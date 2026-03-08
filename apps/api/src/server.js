@@ -1,142 +1,415 @@
-// torvex api - websocket signaling server with wallet auth
-// challenge-response ed25519 auth, drizzle persistence, ws relay
+// torvex api - production-grade e2e encrypted relay
+// hardened auth, ws protection, zero-knowledge message relay
 
 import "dotenv/config";
-import { createServer } from "http";
+import { createServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import express from "express";
+import helmet from "helmet";
 import cors from "cors";
 import { WebSocketServer } from "ws";
 import { v4 as uid } from "uuid";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
+import { verifyMessage } from "ethers";
 import { db } from "./db/index.js";
 import { users, messages } from "./db/schema.js";
-import { eq } from "drizzle-orm";
 
 const PORT = process.env.PORT || 4400;
+const JWT_SECRET = process.env.JWT_SECRET;
+const ALLOWED_ORIGINS =
+  process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()) || [];
+const IS_PROD = process.env.NODE_ENV === "production";
+
+if (!JWT_SECRET || JWT_SECRET.length < 64)
+  throw new Error("JWT_SECRET must be at least 64 chars");
+
+const CHALLENGE_TTL = 30_000;
+const CHALLENGE_MAX = 10_000;
+const TOKEN_EXPIRY = "24h";
+const WS_MAX_MSG = 32_768;
+const WS_MSG_RATE = { window: 1000, max: 10 };
+const WS_MAX_CONNECTIONS_PER_IP = 5;
+const ENCPUB_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,64}$/;
+const PUBKEY_MIN = 10;
+const PUBKEY_MAX = 128;
+
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.set("trust proxy", IS_PROD ? 1 : false);
+app.disable("x-powered-by");
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        connectSrc: ["'self'", "wss:", "ws:"],
+      },
+    },
+    hsts: IS_PROD
+      ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+      : false,
+    referrerPolicy: { policy: "no-referrer" },
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
+app.use(
+  cors({
+    origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : "*",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+    maxAge: 86400,
+  }),
+);
+
+app.use(express.json({ limit: "8kb" }));
+
+app.use((req, res, next) => {
+  req.id = randomBytes(8).toString("hex");
+  res.setHeader("X-Request-ID", req.id);
+  next();
+});
+
+const authLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "rate limited" },
+});
+
+app.use("/auth", authLimiter);
 
 const challenges = new Map();
-const tokens = new Map();
 const sockets = new Map();
+const encPubs = new Map();
+const wsPerIp = new Map();
+const revokedTokens = new Set();
+
+function verifyToken(raw) {
+  if (!raw || typeof raw !== "string" || raw.length > 2048) return null;
+  try {
+    const payload = jwt.verify(raw, JWT_SECRET, { algorithms: ["HS256"] });
+    if (revokedTokens.has(payload.jti)) return null;
+    if (!payload.sub || typeof payload.sub !== "string") return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function isValidPubkey(pk) {
+  return (
+    typeof pk === "string" &&
+    pk.length >= PUBKEY_MIN &&
+    pk.length <= PUBKEY_MAX &&
+    /^[a-zA-Z0-9]+$/.test(pk)
+  );
+}
+
+function isValidEthAddress(addr) {
+  return /^0x[0-9a-fA-F]{40}$/.test(addr);
+}
+
+function clientIp(req) {
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
 
 app.post("/auth/challenge", (req, res) => {
   const { pubkey } = req.body;
-  if (!pubkey) return res.status(400).json({ error: "missing pubkey" });
-  const challenge = uid() + "-" + Date.now();
-  challenges.set(pubkey, challenge);
-  setTimeout(() => challenges.delete(pubkey), 60000);
+
+  if (!pubkey || !isValidPubkey(pubkey))
+    return res.status(400).json({ error: "invalid pubkey" });
+
+  if (challenges.size >= CHALLENGE_MAX) {
+    const now = Date.now();
+    for (const [k, v] of challenges) {
+      if (now - v.created > CHALLENGE_TTL) challenges.delete(k);
+    }
+    if (challenges.size >= CHALLENGE_MAX)
+      return res.status(503).json({ error: "server busy" });
+  }
+
+  const nonce = randomBytes(32).toString("hex");
+  const challenge = `torvex-auth:${nonce}:${Date.now()}`;
+  challenges.set(pubkey, { challenge, created: Date.now(), ip: clientIp(req) });
+  setTimeout(() => challenges.delete(pubkey), CHALLENGE_TTL);
   res.json({ challenge });
 });
 
 app.post("/auth/verify", async (req, res) => {
   const { pubkey, signature } = req.body;
-  if (!pubkey || !signature)
-    return res.status(400).json({ error: "missing fields" });
 
-  const challenge = challenges.get(pubkey);
-  if (!challenge)
-    return res.status(401).json({ error: "no pending challenge" });
+  if (
+    !pubkey ||
+    !signature ||
+    typeof signature !== "string" ||
+    signature.length > 1024
+  )
+    return res.status(400).json({ error: "invalid request" });
+
+  const entry = challenges.get(pubkey);
+  if (!entry) return res.status(401).json({ error: "no challenge" });
+  if (Date.now() - entry.created > CHALLENGE_TTL)
+    return res.status(401).json({ error: "expired" });
+
+  challenges.delete(pubkey);
 
   try {
-    const sigBytes = bs58.decode(signature);
-    const msgBytes = new TextEncoder().encode(challenge);
-    const pubBytes = bs58.decode(pubkey);
+    const isEth = pubkey.startsWith("0x");
 
-    if (!nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
-      return res.status(401).json({ error: "invalid signature" });
+    if (isEth) {
+      if (!isValidEthAddress(pubkey))
+        return res.status(400).json({ error: "invalid address" });
+      const recovered = verifyMessage(entry.challenge, signature);
+      if (recovered.toLowerCase() !== pubkey.toLowerCase())
+        return res.status(401).json({ error: "bad signature" });
+    } else {
+      const sigBytes = bs58.decode(signature);
+      const pubBytes = bs58.decode(pubkey);
+      if (pubBytes.length !== 32)
+        return res.status(400).json({ error: "invalid pubkey length" });
+      if (sigBytes.length !== 64)
+        return res.status(400).json({ error: "invalid signature length" });
+      if (
+        !nacl.sign.detached.verify(
+          new TextEncoder().encode(entry.challenge),
+          sigBytes,
+          pubBytes,
+        )
+      )
+        return res.status(401).json({ error: "bad signature" });
     }
 
-    challenges.delete(pubkey);
-    const token = uid();
-    tokens.set(token, pubkey);
+    const jti = randomBytes(16).toString("hex");
+    const token = jwt.sign(
+      { sub: pubkey, jti, iat: Math.floor(Date.now() / 1000) },
+      JWT_SECRET,
+      {
+        algorithm: "HS256",
+        expiresIn: TOKEN_EXPIRY,
+      },
+    );
 
     try {
       await db.insert(users).values({ pubkey }).onConflictDoNothing();
-      console.log("user saved:", pubkey.slice(0, 8));
     } catch (e) {
-      console.error("db user insert error:", e.message);
+      console.error(`[${req.id}] db user insert:`, e.message);
     }
 
     res.json({ token, pubkey });
-  } catch (err) {
+  } catch (e) {
+    console.error(`[${req.id}] verify error:`, e.message);
     res.status(400).json({ error: "verification failed" });
   }
 });
 
 app.get("/auth/me", (req, res) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  const pubkey = tokens.get(token);
-  if (!pubkey) return res.status(401).json({ error: "unauthorized" });
-  res.json({ pubkey });
+  const payload = verifyToken(
+    req.headers.authorization?.replace("Bearer ", ""),
+  );
+  if (!payload) return res.status(401).json({ error: "unauthorized" });
+  res.json({ pubkey: payload.sub });
+});
+
+app.post("/auth/revoke", (req, res) => {
+  const payload = verifyToken(
+    req.headers.authorization?.replace("Bearer ", ""),
+  );
+  if (!payload) return res.status(401).json({ error: "unauthorized" });
+  revokedTokens.add(payload.jti);
+  setTimeout(() => revokedTokens.delete(payload.jti), 24 * 60 * 60 * 1000);
+  res.json({ ok: true });
+});
+
+app.use((err, req, res, _next) => {
+  console.error(`[${req.id}] unhandled:`, err.message);
+  res.status(500).json({ error: "internal error" });
+});
+
+app.use((_req, res) => {
+  res.status(404).json({ error: "not found" });
 });
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: WS_MAX_MSG,
+  perMessageDeflate: false,
+});
 
-function broadcast(sender, payload) {
-  for (const [pubkey, ws] of sockets) {
-    if (pubkey !== sender && ws.readyState === 1) {
-      ws.send(JSON.stringify(payload));
-    }
+function broadcast(sender, data) {
+  const raw = JSON.stringify(data);
+  for (const [pk, ws] of sockets) {
+    if (pk !== sender && ws.readyState === 1) ws.send(raw);
   }
 }
 
-wss.on("connection", (ws, req) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const token = url.searchParams.get("token");
-  const pubkey = tokens.get(token);
+function getWsIp(req) {
+  return (
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    "unknown"
+  );
+}
 
-  if (!pubkey) {
+wss.on("connection", (ws, req) => {
+  const ip = getWsIp(req);
+
+  const ipCount = (wsPerIp.get(ip) || 0) + 1;
+  if (ipCount > WS_MAX_CONNECTIONS_PER_IP) {
+    ws.close(4429, "too many connections");
+    return;
+  }
+  wsPerIp.set(ip, ipCount);
+
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const payload = verifyToken(url.searchParams.get("token"));
+  if (!payload) {
+    wsPerIp.set(ip, (wsPerIp.get(ip) || 1) - 1);
     ws.close(4001, "unauthorized");
     return;
   }
 
+  const pubkey = payload.sub;
+  const encPub = url.searchParams.get("encPub");
+
+  if (encPub && !ENCPUB_PATTERN.test(encPub)) {
+    wsPerIp.set(ip, (wsPerIp.get(ip) || 1) - 1);
+    ws.close(4003, "invalid encPub");
+    return;
+  }
+
+  if (sockets.has(pubkey)) {
+    sockets.get(pubkey).close(4002, "superseded");
+  }
+
   sockets.set(pubkey, ws);
-  broadcast(pubkey, { type: "user_joined", pubkey, ts: Date.now() });
+  if (encPub) encPubs.set(pubkey, encPub);
+
+  broadcast(pubkey, {
+    type: "user_joined",
+    pubkey,
+    encPub: encPub || null,
+    ts: Date.now(),
+  });
+
+  for (const [pk, ep] of encPubs) {
+    if (pk !== pubkey)
+      ws.send(JSON.stringify({ type: "key_announce", from: pk, encPub: ep }));
+  }
+
+  let msgTimestamps = [];
 
   ws.on("message", async (raw) => {
+    const now = Date.now();
+    msgTimestamps = msgTimestamps.filter((t) => now - t < WS_MSG_RATE.window);
+    if (msgTimestamps.length >= WS_MSG_RATE.max) {
+      ws.send(JSON.stringify({ type: "error", error: "slow down" }));
+      return;
+    }
+    msgTimestamps.push(now);
+
     try {
       const msg = JSON.parse(raw);
-      if (msg.type === "chat") {
-        const payload = {
-          type: "chat",
-          id: uid(),
+      if (!msg || typeof msg !== "object" || !msg.type) return;
+
+      if (msg.type === "key_announce") {
+        if (typeof msg.encPub !== "string" || !ENCPUB_PATTERN.test(msg.encPub))
+          return;
+        encPubs.set(pubkey, msg.encPub);
+        broadcast(pubkey, {
+          type: "key_announce",
           from: pubkey,
-          to: msg.to || null,
-          text: msg.text,
-          ts: Date.now(),
-        };
+          encPub: msg.encPub,
+        });
+        return;
+      }
 
-        if (msg.to && sockets.has(msg.to)) {
-          sockets.get(msg.to).send(JSON.stringify(payload));
-          ws.send(JSON.stringify(payload));
-        } else {
-          broadcast(pubkey, payload);
-          ws.send(JSON.stringify(payload));
-        }
+      if (msg.type !== "chat") return;
 
-        try {
-          await db.insert(messages).values({
-            id: payload.id,
-            fromPubkey: pubkey,
-            toPubkey: msg.to || null,
-            ciphertext: msg.text,
-          });
-          console.log("msg saved:", payload.id);
-        } catch (e) {
-          console.error("db msg insert error:", e.message);
+      if (
+        !msg.recipients ||
+        !Array.isArray(msg.recipients) ||
+        msg.recipients.length === 0
+      ) {
+        ws.send(
+          JSON.stringify({ type: "error", error: "e2e encryption required" }),
+        );
+        return;
+      }
+
+      if (msg.recipients.length > 100) return;
+
+      const msgId = uid();
+      const ts = Date.now();
+
+      for (const r of msg.recipients) {
+        if (!r.to || !r.nonce || !r.ciphertext) continue;
+        if (
+          typeof r.to !== "string" ||
+          typeof r.nonce !== "string" ||
+          typeof r.ciphertext !== "string"
+        )
+          continue;
+        if (r.nonce.length > 128 || r.ciphertext.length > 16384) continue;
+        if (sockets.has(r.to) && sockets.get(r.to).readyState === 1) {
+          sockets.get(r.to).send(
+            JSON.stringify({
+              type: "chat",
+              id: msgId,
+              from: pubkey,
+              nonce: r.nonce,
+              ciphertext: r.ciphertext,
+              ts,
+            }),
+          );
         }
+      }
+
+      ws.send(JSON.stringify({ type: "chat_ack", id: msgId, ts }));
+
+      try {
+        await db.insert(messages).values({
+          id: msgId,
+          fromPubkey: pubkey,
+          toPubkey: null,
+          ciphertext: `[e2e:${msg.recipients.length}]`,
+        });
+      } catch (e) {
+        console.error(`[ws] db insert:`, e.message);
       }
     } catch {}
   });
 
   ws.on("close", () => {
     sockets.delete(pubkey);
+    encPubs.delete(pubkey);
+    const count = (wsPerIp.get(ip) || 1) - 1;
+    if (count <= 0) wsPerIp.delete(ip);
+    else wsPerIp.set(ip, count);
     broadcast(pubkey, { type: "user_left", pubkey, ts: Date.now() });
   });
+
+  ws.on("error", () => ws.terminate());
 });
 
-server.listen(PORT, () => console.log(`torvex api running on :${PORT}`));
+function shutdown() {
+  console.log("shutting down...");
+  wss.clients.forEach((ws) => ws.close(1001, "server restarting"));
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5000);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
+server.listen(PORT, () =>
+  console.log(`torvex api on :${PORT} (${IS_PROD ? "prod" : "dev"})`),
+);

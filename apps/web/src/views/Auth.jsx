@@ -1,5 +1,5 @@
-// torvex web - wallet auth with bip39 seed generation
-// creates keypair from mnemonic and signs server challenge
+// torvex web - wallet auth with e2e encryption keypairs
+// supports phantom, metamask, and bip39 seed login
 
 import React, { useState } from "react";
 import * as bip39 from "bip39";
@@ -10,7 +10,32 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:4400";
 
 function deriveKeypair(mnemonic) {
   const seed = bip39.mnemonicToSeedSync(mnemonic).slice(0, 32);
-  return nacl.sign.keyPair.fromSeed(seed);
+  return {
+    sign: nacl.sign.keyPair.fromSeed(seed),
+    encrypt: nacl.box.keyPair.fromSecretKey(seed),
+  };
+}
+
+async function fetchChallenge(pubkey) {
+  const res = await fetch(`${API}/auth/challenge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pubkey }),
+  });
+  const data = await res.json();
+  if (!data.challenge) throw new Error("failed to get challenge");
+  return data.challenge;
+}
+
+async function verifySignature(pubkey, signature) {
+  const res = await fetch(`${API}/auth/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pubkey, signature }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error);
+  return data;
 }
 
 export default function Auth({ onAuth }) {
@@ -18,44 +43,97 @@ export default function Auth({ onAuth }) {
   const [phase, setPhase] = useState("start");
   const [error, setError] = useState("");
   const [generatedPhrase, setGeneratedPhrase] = useState("");
+  const [loading, setLoading] = useState("");
 
-  async function signIn(phrase) {
+  async function signInWithSeed(phrase) {
     setError("");
     try {
-      const keypair = deriveKeypair(phrase);
-      const pubkey = bs58.encode(keypair.publicKey);
-
-      const challengeRes = await fetch(`${API}/auth/challenge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pubkey }),
-      });
-      const { challenge } = await challengeRes.json();
-      if (!challenge) throw new Error("failed to get challenge");
-
-      const msgBytes = new TextEncoder().encode(challenge);
+      const keys = deriveKeypair(phrase);
+      const pubkey = bs58.encode(keys.sign.publicKey);
+      const challenge = await fetchChallenge(pubkey);
       const signature = bs58.encode(
-        nacl.sign.detached(msgBytes, keypair.secretKey),
+        nacl.sign.detached(
+          new TextEncoder().encode(challenge),
+          keys.sign.secretKey,
+        ),
       );
-
-      const verifyRes = await fetch(`${API}/auth/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pubkey, signature }),
+      const data = await verifySignature(pubkey, signature);
+      onAuth({
+        token: data.token,
+        pubkey: data.pubkey,
+        encryptKeys: {
+          publicKey: keys.encrypt.publicKey,
+          secretKey: keys.encrypt.secretKey,
+        },
       });
-      const data = await verifyRes.json();
-      if (!verifyRes.ok) throw new Error(data.error);
-
-      onAuth({ token: data.token, pubkey: data.pubkey });
     } catch (err) {
       setError(err.message);
     }
   }
 
-  function generateWallet() {
-    const phrase = bip39.generateMnemonic(256);
-    setGeneratedPhrase(phrase);
-    setPhase("generated");
+  async function signInWithPhantom() {
+    setError("");
+    setLoading("phantom");
+    try {
+      const phantom = window?.solana;
+      if (!phantom?.isPhantom)
+        throw new Error(
+          "phantom wallet not found — install it from phantom.app",
+        );
+      const resp = await phantom.connect();
+      const pubkey = resp.publicKey.toString();
+      const challenge = await fetchChallenge(pubkey);
+      const { signature } = await phantom.signMessage(
+        new TextEncoder().encode(challenge),
+        "utf8",
+      );
+      const data = await verifySignature(pubkey, bs58.encode(signature));
+      const ephemeral = nacl.box.keyPair();
+      onAuth({
+        token: data.token,
+        pubkey: data.pubkey,
+        encryptKeys: {
+          publicKey: ephemeral.publicKey,
+          secretKey: ephemeral.secretKey,
+        },
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function signInWithMetaMask() {
+    setError("");
+    setLoading("metamask");
+    try {
+      if (!window?.ethereum?.isMetaMask)
+        throw new Error("metamask not found — install it from metamask.io");
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      const address = accounts[0];
+      const challenge = await fetchChallenge(address);
+      const signature = await window.ethereum.request({
+        method: "personal_sign",
+        params: [challenge, address],
+      });
+      const data = await verifySignature(address, signature);
+      const ephemeral = nacl.box.keyPair();
+      onAuth({
+        token: data.token,
+        pubkey: data.pubkey,
+        encryptKeys: {
+          publicKey: ephemeral.publicKey,
+          secretKey: ephemeral.secretKey,
+        },
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
   }
 
   if (phase === "generated") {
@@ -75,7 +153,7 @@ export default function Auth({ onAuth }) {
             write this down. it is your only login. lose it and you lose access
             forever.
           </p>
-          <button onClick={() => signIn(generatedPhrase)}>
+          <button onClick={() => signInWithSeed(generatedPhrase)}>
             i saved it — sign in
           </button>
           {error && <p className="error">{error}</p>}
@@ -103,11 +181,9 @@ export default function Auth({ onAuth }) {
           {error && <p className="error">{error}</p>}
           <button
             onClick={() => {
-              if (!bip39.validateMnemonic(mnemonic.trim())) {
-                setError("invalid seed phrase");
-                return;
-              }
-              signIn(mnemonic.trim());
+              if (!bip39.validateMnemonic(mnemonic.trim()))
+                return setError("invalid seed phrase");
+              signInWithSeed(mnemonic.trim());
             }}
           >
             sign in with seed
@@ -125,10 +201,41 @@ export default function Auth({ onAuth }) {
       <div className="auth-card">
         <h1 className="logo">torvex</h1>
         <p className="tagline">encrypted. anonymous. yours.</p>
-        <button onClick={generateWallet}>create new wallet</button>
-        <button className="btn-secondary" onClick={() => setPhase("restore")}>
-          restore from seed phrase
-        </button>
+        <div className="auth-section">
+          <h3 className="section-label">wallet extensions</h3>
+          <button
+            className="btn-wallet btn-phantom"
+            onClick={signInWithPhantom}
+            disabled={!!loading}
+          >
+            {loading === "phantom" ? "connecting..." : "sign in with phantom"}
+          </button>
+          <button
+            className="btn-wallet btn-metamask"
+            onClick={signInWithMetaMask}
+            disabled={!!loading}
+          >
+            {loading === "metamask" ? "connecting..." : "sign in with metamask"}
+          </button>
+        </div>
+        <div className="auth-divider">
+          <span>or</span>
+        </div>
+        <div className="auth-section">
+          <h3 className="section-label">seed phrase</h3>
+          <button
+            onClick={() => {
+              setGeneratedPhrase(bip39.generateMnemonic(256));
+              setPhase("generated");
+            }}
+          >
+            create new wallet
+          </button>
+          <button className="btn-secondary" onClick={() => setPhase("restore")}>
+            restore from seed phrase
+          </button>
+        </div>
+        {error && <p className="error">{error}</p>}
       </div>
     </div>
   );
