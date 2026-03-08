@@ -173,7 +173,8 @@ app.post("/auth/verify", async (req, res) => {
     )
       return res.status(401).json({ error: "bad signature" });
 
-    const did = typeof deviceId === "string" && deviceId.length <= 64 ? deviceId : null;
+    const did =
+      typeof deviceId === "string" && deviceId.length <= 64 ? deviceId : null;
     const jti = randomBytes(16).toString("hex");
     const token = jwt.sign(
       { sub: pubkey, jti, did, iat: Math.floor(Date.now() / 1000) },
@@ -372,7 +373,12 @@ app.get("/keys/count", authMiddleware, async (req, res) => {
     const [row] = await db
       .select({ count: sql`count(*)::int` })
       .from(oneTimePrekeys)
-      .where(and(eq(oneTimePrekeys.pubkey, req.pubkey), eq(oneTimePrekeys.used, false)));
+      .where(
+        and(
+          eq(oneTimePrekeys.pubkey, req.pubkey),
+          eq(oneTimePrekeys.used, false),
+        ),
+      );
     res.json({ count: row?.count || 0 });
   } catch (e) {
     console.error(`[${req.id}] key count:`, e.message);

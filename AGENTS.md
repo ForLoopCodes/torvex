@@ -92,7 +92,7 @@ torvex/
 
 | layer          | protection                                                                       |
 | -------------- | -------------------------------------------------------------------------------- |
-| auth           | jwt hs256 + jti + revocation + device_id, 30s one-time challenges, csprng nonces  |
+| auth           | jwt hs256 + jti + revocation + device_id, 30s one-time challenges, csprng nonces |
 | http           | helmet (csp, hsts, xss, clickjack), cors lockdown, 8kb body limit, rate limiting |
 | websocket      | 10 msg/sec rate limit, 32kb max payload, 5 conn/ip, encpub validation            |
 | encryption     | signal double ratchet — per-message forward secrecy, x3dh session init           |

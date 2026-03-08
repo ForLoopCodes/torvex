@@ -39,7 +39,12 @@ async function deriveEncKey(pin) {
     ["deriveKey"],
   );
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: enc.encode("torvex-vault-v1"), iterations: 300000, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: enc.encode("torvex-vault-v1"),
+      iterations: 300000,
+      hash: "SHA-256",
+    },
     key,
     { name: "AES-GCM", length: 256 },
     false,
@@ -163,7 +168,8 @@ export default function Auth({ onAuth }) {
 
   async function unlockVault() {
     setError("");
-    if (!pin || pin.length < 4) return setError("pin must be at least 4 digits");
+    if (!pin || pin.length < 4)
+      return setError("pin must be at least 4 digits");
     try {
       const phrase = await decryptVault(pin);
       if (!phrase) return setError("no saved wallet found");
@@ -231,7 +237,8 @@ export default function Auth({ onAuth }) {
           {error && <p className="error">{error}</p>}
           <button
             onClick={() => {
-              if (pin.length < 4) return setError("pin must be at least 4 digits");
+              if (pin.length < 4)
+                return setError("pin must be at least 4 digits");
               authenticate(generatedPhrase, pin);
             }}
           >
@@ -271,7 +278,8 @@ export default function Auth({ onAuth }) {
             onClick={() => {
               if (!validateMnemonic(mnemonic.trim()))
                 return setError("invalid seed phrase");
-              if (pin.length < 4) return setError("pin must be at least 4 digits");
+              if (pin.length < 4)
+                return setError("pin must be at least 4 digits");
               authenticate(mnemonic.trim(), pin);
             }}
           >
