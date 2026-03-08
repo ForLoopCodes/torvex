@@ -292,34 +292,46 @@ export default function Chat({ session, onLogout }) {
     [session, hasRatchetKeys, getRatchet, setRatchet, peerLabel, addMsg],
   );
 
-  const processOfflineMessages = useCallback(
-    async () => {
-      if (!hasRatchetKeys) return;
-      const pending = await fetchPendingMessages(session.token);
-      for (const pm of pending) {
-        try {
-          const data = JSON.parse(pm.ciphertext);
-          if (!data.header || !data.nonce || !data.ciphertext) continue;
-          const senderPk = pm.fromPubkey;
-          const state = getRatchet(senderPk);
-          if (!state) continue;
-          const text = ratchetDecrypt(state, data.header, data.nonce, data.ciphertext);
-          setRatchet(senderPk, state);
-          addMsg(senderPk, {
-            id: pm.id,
-            from: senderPk,
-            text,
-            ts: new Date(pm.createdAt).getTime(),
-            read: false,
-          });
-          if (activePeerRef.current !== senderPk)
-            setUnread((prev) => ({ ...prev, [senderPk]: (prev[senderPk] || 0) + 1 }));
-          notifyMsg(peerLabel(senderPk), text);
-        } catch {}
-      }
-    },
-    [session.token, hasRatchetKeys, getRatchet, setRatchet, addMsg, peerLabel],
-  );
+  const processOfflineMessages = useCallback(async () => {
+    if (!hasRatchetKeys) return;
+    const pending = await fetchPendingMessages(session.token);
+    for (const pm of pending) {
+      try {
+        const data = JSON.parse(pm.ciphertext);
+        if (!data.header || !data.nonce || !data.ciphertext) continue;
+        const senderPk = pm.fromPubkey;
+        const state = getRatchet(senderPk);
+        if (!state) continue;
+        const text = ratchetDecrypt(
+          state,
+          data.header,
+          data.nonce,
+          data.ciphertext,
+        );
+        setRatchet(senderPk, state);
+        addMsg(senderPk, {
+          id: pm.id,
+          from: senderPk,
+          text,
+          ts: new Date(pm.createdAt).getTime(),
+          read: false,
+        });
+        if (activePeerRef.current !== senderPk)
+          setUnread((prev) => ({
+            ...prev,
+            [senderPk]: (prev[senderPk] || 0) + 1,
+          }));
+        notifyMsg(peerLabel(senderPk), text);
+      } catch {}
+    }
+  }, [
+    session.token,
+    hasRatchetKeys,
+    getRatchet,
+    setRatchet,
+    addMsg,
+    peerLabel,
+  ]);
 
   const handleMsg = useCallback(
     (e) => {
