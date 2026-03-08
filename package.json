@@ -1,5 +1,5 @@
 {
-  "name": "torchat",
+  "name": "torvex",
   "private": true,
   "workspaces": [
     "apps/*"

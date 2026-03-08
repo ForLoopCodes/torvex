@@ -1,4 +1,4 @@
-// torchat web - chat view with websocket messaging
+// torvex web - chat view with websocket messaging
 // renders message list sidebar and live chat area
 
 import React, { useState, useEffect, useRef } from "react";
@@ -50,7 +50,7 @@ export default function Chat({ session, onLogout }) {
     <div className="chat-layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <h2>torchat</h2>
+          <h2>torvex</h2>
           <span className="user-badge" title={session.pubkey}>
             {shortKey(session.pubkey)}
           </span>

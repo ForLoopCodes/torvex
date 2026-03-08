@@ -1,4 +1,4 @@
-// torchat db - drizzle schema for users and messages
+// torvex db - drizzle schema for users and messages
 // stores wallet pubkeys and encrypted message queue
 
 import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";

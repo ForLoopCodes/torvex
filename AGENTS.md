@@ -1,8 +1,8 @@
-# AGENTS.md — torchat project context
+# AGENTS.md — torvex project context
 
 ## project overview
 
-torchat is an encrypted anonymous chat app using wallet-based authentication (BIP39 seed phrases + Ed25519 keypairs). no passwords, no emails. your private key IS your identity.
+torvex is an encrypted anonymous chat app using wallet-based authentication (BIP39 seed phrases + Ed25519 keypairs). no passwords, no emails. your private key IS your identity.
 
 ## architecture
 
@@ -35,7 +35,7 @@ torchat is an encrypted anonymous chat app using wallet-based authentication (BI
 ## file structure
 
 ```
-torchat/
+torvex/
 ├── plan.md                      (full 5-phase roadmap, DO NOT EDIT)
 ├── turbo.json
 ├── package.json                 (npm workspaces root)

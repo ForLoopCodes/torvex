@@ -1,10 +1,10 @@
 AI AGENTS ARE NOT ALLOWED TO CHANGE THIS FILE'S CONTENTS.
 
-# plan.md: torchat architecture & execution
+# plan.md: torvex architecture & execution
 
 ## 1. the original vision
 
-> project idea: torchat app - android and apple - uses tor network and sign in with your wallet (bitcoin/solana/eth) to chat with others, find people by scanning their qr or their wallet address, send encrypted (even more encrypted than whatsapp and signal and telegram, i mean really true quantum safe encryption), no need for password login, just login with wallet. but the thing is you dont need to pay btc/eth/sol for each chat, its not a web3 app, chat completely anonymously with your friends, no mitm assured
+> project idea: torvex app - android and apple - uses tor network and sign in with your wallet (bitcoin/solana/eth) to chat with others, find people by scanning their qr or their wallet address, send encrypted (even more encrypted than whatsapp and signal and telegram, i mean really true quantum safe encryption), no need for password login, just login with wallet. but the thing is you dont need to pay btc/eth/sol for each chat, its not a web3 app, chat completely anonymously with your friends, no mitm assured
 > give me some papers, plan, summary, tech stack (native, i need the ui to be fast, clean, and use gpu, not react native it sucks) of how to make this app
 > the normal encrypted chat will be free but paid chat has quantum safe, tor, and wallet sign in
 > about the wallet, i mean not login by phantom or metamask, the app will itself be one wallet app which will encrypt chats w/ your keys, you can create wallet, sent transactions, but also use the bip and private keys to log in to your account

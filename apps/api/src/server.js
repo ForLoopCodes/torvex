@@ -1,4 +1,4 @@
-// torchat api - websocket signaling server with wallet auth
+// torvex api - websocket signaling server with wallet auth
 // challenge-response ed25519 auth, drizzle persistence, ws relay
 
 import "dotenv/config";
@@ -133,4 +133,4 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-server.listen(PORT, () => console.log(`torchat api running on :${PORT}`));
+server.listen(PORT, () => console.log(`torvex api running on :${PORT}`));

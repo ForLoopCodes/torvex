@@ -1,4 +1,4 @@
-// torchat web - root app with auth and chat
+// torvex web - root app with auth and chat
 // manages login state and renders appropriate view
 
 import React, { useState } from "react";

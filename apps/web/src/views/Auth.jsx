@@ -1,4 +1,4 @@
-// torchat web - wallet auth with bip39 seed generation
+// torvex web - wallet auth with bip39 seed generation
 // creates keypair from mnemonic and signs server challenge
 
 import React, { useState } from "react";
@@ -65,7 +65,7 @@ export default function Auth({ onAuth }) {
     return (
       <div className="auth-wrap">
         <div className="auth-card">
-          <h1 className="logo">torchat</h1>
+          <h1 className="logo">torvex</h1>
           <p className="tagline">your new wallet seed phrase</p>
           <div className="seed-display">
             {generatedPhrase.split(" ").map((word, i) => (
@@ -94,7 +94,7 @@ export default function Auth({ onAuth }) {
     return (
       <div className="auth-wrap">
         <div className="auth-card">
-          <h1 className="logo">torchat</h1>
+          <h1 className="logo">torvex</h1>
           <p className="tagline">enter your 24-word seed phrase</p>
           <textarea
             className="seed-input"
@@ -126,7 +126,7 @@ export default function Auth({ onAuth }) {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <h1 className="logo">torchat</h1>
+        <h1 className="logo">torvex</h1>
         <p className="tagline">encrypted. anonymous. yours.</p>
         <button onClick={generateWallet}>create new wallet</button>
         <button className="btn-secondary" onClick={() => setPhase("restore")}>

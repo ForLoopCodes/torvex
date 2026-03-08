@@ -1,4 +1,4 @@
-// torchat web - react entry point
+// torvex web - react entry point
 // mounts root app component to dom
 
 import React from "react";

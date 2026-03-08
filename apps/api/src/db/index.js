@@ -1,4 +1,4 @@
-// torchat db - drizzle client initialization
+// torvex db - drizzle client initialization
 // connects to supabase postgres via connection string
 
 import { drizzle } from "drizzle-orm/postgres-js";
