@@ -76,14 +76,14 @@ torvex/
 │           ├── polyfills.js     (buffer global for browser crypto)
 │           ├── main.jsx
 │           ├── App.jsx
-│           ├── styles.css       (dark theme, wallet buttons)
+│           ├── styles.css       (dark theme, ws status, unread badges, responsive)
 │           ├── crypto/
 │           │   ├── keys.js      (bip44 slip-0010 hd derivation)
 │           │   ├── x3dh.js      (extended triple diffie-hellman)
 │           │   └── ratchet.js   (signal double ratchet protocol)
 │           └── views/
 │               ├── Auth.jsx     (seed + phantom + metamask auth + prekey upload)
-│               └── Chat.jsx     (double ratchet encrypted chat with per-peer sessions)
+│               └── Chat.jsx     (double ratchet chat, reconnect, notifications, offline decrypt, history persistence)
 ```
 
 ## security features

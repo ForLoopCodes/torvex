@@ -16,7 +16,8 @@ const PATHS = {
 
 function slip0010Derive(seed, path) {
   let I = hmac(sha512, new TextEncoder().encode("ed25519 seed"), seed);
-  let key = I.slice(0, 32), chain = I.slice(32);
+  let key = I.slice(0, 32),
+    chain = I.slice(32);
   for (const idx of path) {
     const data = new Uint8Array(37);
     data.set(key, 1);
@@ -31,9 +32,15 @@ function slip0010Derive(seed, path) {
 export function deriveAllKeys(mnemonic) {
   const seed = bip39.mnemonicToSeedSync(mnemonic);
   return {
-    identity: nacl.sign.keyPair.fromSeed(slip0010Derive(seed, PATHS.torvexSign)),
-    encryption: nacl.box.keyPair.fromSecretKey(slip0010Derive(seed, PATHS.torvexEncrypt)),
-    prekey: nacl.box.keyPair.fromSecretKey(slip0010Derive(seed, PATHS.torvexPrekey)),
+    identity: nacl.sign.keyPair.fromSeed(
+      slip0010Derive(seed, PATHS.torvexSign),
+    ),
+    encryption: nacl.box.keyPair.fromSecretKey(
+      slip0010Derive(seed, PATHS.torvexEncrypt),
+    ),
+    prekey: nacl.box.keyPair.fromSecretKey(
+      slip0010Derive(seed, PATHS.torvexPrekey),
+    ),
   };
 }
 

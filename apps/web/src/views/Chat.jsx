@@ -1,5 +1,5 @@
-// torvex web - double ratchet encrypted chat
-// typing indicators, read receipts, offline delivery, display names
+// torvex web - encrypted chat with signal double ratchet
+// reconnect, notifications, offline decrypt, message persistence
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import bs58 from "bs58";
@@ -19,8 +19,12 @@ import {
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:4400";
 const API = import.meta.env.VITE_API_URL || "http://localhost:4400";
-const STORAGE_PREFIX = "torvex_ratchet_";
+const RATCHET_PREFIX = "torvex_ratchet_";
+const HISTORY_PREFIX = "torvex_hist_";
 const TYPING_TIMEOUT = 2000;
+const RECONNECT_BASE = 1000;
+const RECONNECT_MAX = 30000;
+const MAX_HISTORY = 200;
 
 function shortKey(pk) {
   return pk.slice(0, 4) + "..." + pk.slice(-4);
@@ -28,7 +32,7 @@ function shortKey(pk) {
 
 function loadRatchetState(myPk, peerPk) {
   try {
-    const raw = sessionStorage.getItem(`${STORAGE_PREFIX}${myPk}:${peerPk}`);
+    const raw = sessionStorage.getItem(`${RATCHET_PREFIX}${myPk}:${peerPk}`);
     return raw ? deserializeState(raw) : null;
   } catch {
     return null;
@@ -38,10 +42,42 @@ function loadRatchetState(myPk, peerPk) {
 function saveRatchetState(myPk, peerPk, state) {
   try {
     sessionStorage.setItem(
-      `${STORAGE_PREFIX}${myPk}:${peerPk}`,
+      `${RATCHET_PREFIX}${myPk}:${peerPk}`,
       serializeState(state),
     );
   } catch {}
+}
+
+function loadHistory(myPk, peerPk) {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`${HISTORY_PREFIX}${myPk}:${peerPk}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(myPk, peerPk, msgs) {
+  try {
+    localStorage.setItem(
+      `${HISTORY_PREFIX}${myPk}:${peerPk}`,
+      JSON.stringify(msgs.slice(-MAX_HISTORY)),
+    );
+  } catch {}
+}
+
+function notifyMsg(from, text) {
+  if (
+    document.hidden &&
+    Notification.permission === "granted" &&
+    text.length > 0
+  ) {
+    new Notification(`torvex — ${from}`, {
+      body: text.slice(0, 100),
+      icon: "/favicon.ico",
+    });
+  }
 }
 
 async function fetchPrekeyBundle(token, pubkey) {
@@ -83,7 +119,7 @@ async function fetchDisplayName(token, pubkey) {
   }
 }
 
-async function setDisplayName(token, name) {
+async function setMyDisplayName(token, name) {
   const res = await fetch(`${API}/profile/name`, {
     method: "POST",
     headers: {
@@ -96,7 +132,7 @@ async function setDisplayName(token, name) {
 }
 
 export default function Chat({ session, onLogout }) {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState({});
   const [input, setInput] = useState("");
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [activePeer, setActivePeer] = useState(null);
@@ -107,6 +143,8 @@ export default function Chat({ session, onLogout }) {
   const [typingPeers, setTypingPeers] = useState(new Set());
   const [readReceipts, setReadReceipts] = useState({});
   const [addPeerInput, setAddPeerInput] = useState("");
+  const [unread, setUnread] = useState({});
+  const [wsStatus, setWsStatus] = useState("connecting");
   const [contacts, setContacts] = useState(() => {
     try {
       return JSON.parse(
@@ -124,8 +162,15 @@ export default function Chat({ session, onLogout }) {
   const initializingRef = useRef(new Set());
   const typingTimerRef = useRef(null);
   const lastTypingSentRef = useRef(0);
+  const reconnectRef = useRef(0);
+  const reconnectTimerRef = useRef(null);
+  const activePeerRef = useRef(null);
 
   const hasRatchetKeys = !!session.keys?.identity && !!session.keys?.encryption;
+
+  useEffect(() => {
+    activePeerRef.current = activePeer;
+  }, [activePeer]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -133,6 +178,21 @@ export default function Chat({ session, onLogout }) {
       JSON.stringify(contacts),
     );
   }, [contacts, session.pubkey]);
+
+  useEffect(() => {
+    if (Notification.permission === "default") Notification.requestPermission();
+  }, []);
+
+  const addMsg = useCallback(
+    (peerPk, msg) => {
+      setMessages((prev) => {
+        const list = [...(prev[peerPk] || []), msg].slice(-MAX_HISTORY);
+        saveHistory(session.pubkey, peerPk, list);
+        return { ...prev, [peerPk]: list };
+      });
+    },
+    [session.pubkey],
+  );
 
   const getRatchet = useCallback(
     (peerPk) => {
@@ -182,15 +242,12 @@ export default function Chat({ session, onLogout }) {
       try {
         const bundle = await fetchPrekeyBundle(session.token, peerPk);
         if (!bundle) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              from: "system",
-              text: `${peerLabel(peerPk)} has no prekey bundle`,
-              ts: Date.now(),
-            },
-          ]);
+          addMsg(peerPk, {
+            id: Date.now().toString(),
+            from: "system",
+            text: `${peerLabel(peerPk)} has no prekey bundle`,
+            ts: Date.now(),
+          });
           return;
         }
         const ephemeral = generateEphemeralKey();
@@ -215,30 +272,53 @@ export default function Chat({ session, onLogout }) {
             ciphertext: initMsg.ciphertext,
           }),
         );
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            from: "system",
-            text: `ratchet session started with ${peerLabel(peerPk)}`,
-            ts: Date.now(),
-          },
-        ]);
+        addMsg(peerPk, {
+          id: Date.now().toString(),
+          from: "system",
+          text: `ratchet session started with ${peerLabel(peerPk)}`,
+          ts: Date.now(),
+        });
       } catch (err) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            from: "system",
-            text: `session setup failed: ${err.message}`,
-            ts: Date.now(),
-          },
-        ]);
+        addMsg(peerPk, {
+          id: Date.now().toString(),
+          from: "system",
+          text: `session setup failed: ${err.message}`,
+          ts: Date.now(),
+        });
       } finally {
         initializingRef.current.delete(peerPk);
       }
     },
-    [session, hasRatchetKeys, getRatchet, setRatchet, peerLabel],
+    [session, hasRatchetKeys, getRatchet, setRatchet, peerLabel, addMsg],
+  );
+
+  const processOfflineMessages = useCallback(
+    async () => {
+      if (!hasRatchetKeys) return;
+      const pending = await fetchPendingMessages(session.token);
+      for (const pm of pending) {
+        try {
+          const data = JSON.parse(pm.ciphertext);
+          if (!data.header || !data.nonce || !data.ciphertext) continue;
+          const senderPk = pm.fromPubkey;
+          const state = getRatchet(senderPk);
+          if (!state) continue;
+          const text = ratchetDecrypt(state, data.header, data.nonce, data.ciphertext);
+          setRatchet(senderPk, state);
+          addMsg(senderPk, {
+            id: pm.id,
+            from: senderPk,
+            text,
+            ts: new Date(pm.createdAt).getTime(),
+            read: false,
+          });
+          if (activePeerRef.current !== senderPk)
+            setUnread((prev) => ({ ...prev, [senderPk]: (prev[senderPk] || 0) + 1 }));
+          notifyMsg(peerLabel(senderPk), text);
+        } catch {}
+      }
+    },
+    [session.token, hasRatchetKeys, getRatchet, setRatchet, addMsg, peerLabel],
   );
 
   const handleMsg = useCallback(
@@ -279,15 +359,14 @@ export default function Chat({ session, onLogout }) {
           ratchetDecrypt(state, msg.header, msg.nonce, msg.ciphertext);
           setRatchet(msg.from, state);
           resolveDisplayName(msg.from);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              from: "system",
-              text: `ratchet session established with ${shortKey(msg.from)}`,
-              ts: Date.now(),
-            },
-          ]);
+          if (!contacts.includes(msg.from))
+            setContacts((prev) => [...prev, msg.from]);
+          addMsg(msg.from, {
+            id: Date.now().toString(),
+            from: "system",
+            text: `ratchet session established with ${shortKey(msg.from)}`,
+            ts: Date.now(),
+          });
         } catch (err) {
           console.error("x3dh respond failed:", err.message);
         }
@@ -309,10 +388,19 @@ export default function Chat({ session, onLogout }) {
             }
           }
         }
-        setMessages((prev) => [
-          ...prev,
-          { id: msg.id, from: msg.from, text, ts: msg.ts, read: false },
-        ]);
+        addMsg(msg.from, {
+          id: msg.id,
+          from: msg.from,
+          text,
+          ts: msg.ts,
+          read: false,
+        });
+        if (activePeerRef.current !== msg.from)
+          setUnread((prev) => ({
+            ...prev,
+            [msg.from]: (prev[msg.from] || 0) + 1,
+          }));
+        notifyMsg(peerLabel(msg.from), text);
         if (wsRef.current?.readyState === 1)
           wsRef.current.send(
             JSON.stringify({ type: "read", to: msg.from, msgId: msg.id }),
@@ -321,17 +409,14 @@ export default function Chat({ session, onLogout }) {
         const pending = pendingRef.current.get(msg.id);
         if (pending) {
           pendingRef.current.delete(msg.id);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: msg.id,
-              from: session.pubkey,
-              text: pending.text,
-              ts: msg.ts,
-              peer: pending.peer,
-              read: false,
-            },
-          ]);
+          addMsg(pending.peer, {
+            id: msg.id,
+            from: session.pubkey,
+            text: pending.text,
+            ts: msg.ts,
+            peer: pending.peer,
+            read: false,
+          });
         }
       } else if (msg.type === "typing") {
         if (msg.active) {
@@ -354,14 +439,21 @@ export default function Chat({ session, onLogout }) {
         }
       } else if (msg.type === "read") {
         setReadReceipts((prev) => ({ ...prev, [msg.msgId]: true }));
-      } else if (msg.type === "error") {
-        console.warn("server:", msg.error);
       }
     },
-    [session, hasRatchetKeys, getRatchet, setRatchet, resolveDisplayName],
+    [
+      session,
+      hasRatchetKeys,
+      getRatchet,
+      setRatchet,
+      resolveDisplayName,
+      addMsg,
+      peerLabel,
+      contacts,
+    ],
   );
 
-  useEffect(() => {
+  const connectWs = useCallback(() => {
     const encPub = session.keys?.encryption
       ? bs58.encode(session.keys.encryption.publicKey)
       : "";
@@ -369,14 +461,53 @@ export default function Chat({ session, onLogout }) {
       `${WS_URL}?token=${session.token}&encPub=${encPub}`,
     );
     wsRef.current = ws;
+    setWsStatus("connecting");
+
+    ws.onopen = () => {
+      setWsStatus("connected");
+      reconnectRef.current = 0;
+      processOfflineMessages();
+    };
+
     ws.onmessage = handleMsg;
-    ws.onclose = () => console.log("ws closed");
-    return () => ws.close();
-  }, [session.token, handleMsg, session.keys]);
+
+    ws.onclose = (ev) => {
+      setWsStatus("disconnected");
+      if (ev.code === 4001 || ev.code === 4002) return;
+      const delay = Math.min(
+        RECONNECT_BASE * 2 ** reconnectRef.current,
+        RECONNECT_MAX,
+      );
+      reconnectRef.current++;
+      reconnectTimerRef.current = setTimeout(connectWs, delay);
+    };
+
+    ws.onerror = () => ws.close();
+
+    return ws;
+  }, [session, handleMsg, processOfflineMessages]);
+
+  useEffect(() => {
+    const ws = connectWs();
+    return () => {
+      clearTimeout(reconnectTimerRef.current);
+      ws.close();
+    };
+  }, [connectWs]);
+
+  useEffect(() => {
+    const loaded = {};
+    contacts.forEach((pk) => {
+      const hist = loadHistory(session.pubkey, pk);
+      if (hist.length) loaded[pk] = hist;
+    });
+    if (Object.keys(loaded).length)
+      setMessages((prev) => ({ ...loaded, ...prev }));
+  }, [session.pubkey, contacts]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, activePeer]);
 
   useEffect(() => {
     fetchDisplayName(session.token, session.pubkey).then((n) => {
@@ -405,15 +536,12 @@ export default function Chat({ session, onLogout }) {
     if (!text || wsRef.current?.readyState !== 1 || !activePeer) return;
     const state = getRatchet(activePeer);
     if (!state) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          from: "system",
-          text: `no session with ${peerLabel(activePeer)} — click their name to init`,
-          ts: Date.now(),
-        },
-      ]);
+      addMsg(activePeer, {
+        id: Date.now().toString(),
+        from: "system",
+        text: `no session with ${peerLabel(activePeer)} — click their name to init`,
+        ts: Date.now(),
+      });
       setInput("");
       return;
     }
@@ -431,16 +559,13 @@ export default function Chat({ session, onLogout }) {
       if (pendingRef.current.has(tempId)) {
         const p = pendingRef.current.get(tempId);
         pendingRef.current.delete(tempId);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: tempId,
-            from: session.pubkey,
-            text: p.text,
-            ts: Date.now(),
-            peer: p.peer,
-          },
-        ]);
+        addMsg(p.peer, {
+          id: tempId,
+          from: session.pubkey,
+          text: p.text,
+          ts: Date.now(),
+          peer: p.peer,
+        });
       }
     }, 3000);
     setInput("");
@@ -452,7 +577,7 @@ export default function Chat({ session, onLogout }) {
   async function handleSetName() {
     const name = nameInput.trim();
     if (!name) return;
-    const result = await setDisplayName(session.token, name);
+    const result = await setMyDisplayName(session.token, name);
     if (result) {
       setMyName(result);
       setShowNameEdit(false);
@@ -468,15 +593,21 @@ export default function Chat({ session, onLogout }) {
     resolveDisplayName(pk);
   }
 
-  const allPeers = [...new Set([...onlineUsers, ...contacts])];
-  const peerMsgs = activePeer
-    ? messages.filter(
-        (m) =>
-          m.from === activePeer ||
-          (m.from === session.pubkey && m.peer === activePeer) ||
-          m.from === "system",
-      )
-    : [];
+  function copyPubkey() {
+    navigator.clipboard?.writeText(session.pubkey);
+  }
+
+  function selectPeer(pk) {
+    setActivePeer(pk);
+    setUnread((prev) => ({ ...prev, [pk]: 0 }));
+    if (hasRatchetKeys && !getRatchet(pk)) initSessionWithPeer(pk);
+    resolveDisplayName(pk);
+  }
+
+  const allPeers = [...new Set([...onlineUsers, ...contacts])].filter(
+    (u) => u !== session.pubkey,
+  );
+  const peerMsgs = activePeer ? messages[activePeer] || [] : [];
 
   return (
     <div className="chat-layout">
@@ -486,10 +617,13 @@ export default function Chat({ session, onLogout }) {
           <div className="user-info">
             <span
               className="user-badge"
-              title={session.pubkey}
+              title={`click to edit name\n${session.pubkey}`}
               onClick={() => setShowNameEdit(!showNameEdit)}
             >
               {myName || shortKey(session.pubkey)}
+            </span>
+            <span className="copy-pk" title="copy pubkey" onClick={copyPubkey}>
+              copy id
             </span>
             {showNameEdit && (
               <div className="name-edit">
@@ -504,11 +638,18 @@ export default function Chat({ session, onLogout }) {
             )}
           </div>
         </div>
+        <div className="ws-status">
+          <span
+            className={`status-dot ${wsStatus === "connected" ? "dot-ok" : wsStatus === "connecting" ? "dot-warn" : "dot-err"}`}
+          />
+          <span className="ws-label">{wsStatus}</span>
+        </div>
         <div className="add-contact">
           <input
             value={addPeerInput}
             onChange={(e) => setAddPeerInput(e.target.value)}
             placeholder="add by pubkey..."
+            onKeyDown={(e) => e.key === "Enter" && addContact()}
           />
           <button onClick={addContact}>+</button>
         </div>
@@ -520,14 +661,13 @@ export default function Chat({ session, onLogout }) {
               key={u}
               className={`online-user ${activePeer === u ? "active" : ""} ${onlineUsers.includes(u) ? "is-online" : "is-offline"}`}
               title={u}
-              onClick={() => {
-                setActivePeer(u);
-                if (hasRatchetKeys && !getRatchet(u)) initSessionWithPeer(u);
-                resolveDisplayName(u);
-              }}
+              onClick={() => selectPeer(u)}
             >
               <span className="status-dot" />
               <span className="peer-name">{peerLabel(u)}</span>
+              {(unread[u] || 0) > 0 && (
+                <span className="unread-badge">{unread[u]}</span>
+              )}
               <span className="peer-lock">{getRatchet(u) ? "🔒" : "⚠️"}</span>
             </div>
           ))}
@@ -596,8 +736,11 @@ export default function Chat({ session, onLogout }) {
                 }}
                 placeholder={`message ${peerLabel(activePeer)}...`}
                 autoFocus
+                disabled={wsStatus !== "connected"}
               />
-              <button type="submit">send</button>
+              <button type="submit" disabled={wsStatus !== "connected"}>
+                send
+              </button>
             </form>
           </>
         )}

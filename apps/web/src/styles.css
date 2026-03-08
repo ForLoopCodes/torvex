@@ -575,6 +575,60 @@ button:hover {
   cursor: not-allowed;
 }
 
+.ws-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 4px 0;
+}
+
+.ws-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dot-ok {
+  background: #4ade80 !important;
+}
+
+.dot-warn {
+  background: #facc15 !important;
+}
+
+.dot-err {
+  background: var(--danger) !important;
+}
+
+.copy-pk {
+  font-size: 0.7rem;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.copy-pk:hover {
+  color: var(--accent);
+}
+
+.unread-badge {
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  flex-shrink: 0;
+}
+
 @media (max-width: 768px) {
   .sidebar {
     width: 200px;
