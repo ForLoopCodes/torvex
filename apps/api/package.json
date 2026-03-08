@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "node src/server.js",
-    "build": "echo 'no build step'"
+    "build": "echo 'no build step'",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "bs58": "^1.1.0",
@@ -16,5 +19,8 @@
     "tweetnacl": "^1.0.3",
     "uuid": "^9.0.0",
     "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.9"
   }
 }

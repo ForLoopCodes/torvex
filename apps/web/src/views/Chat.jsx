@@ -3,7 +3,11 @@
 
 import React, { useState, useEffect, useRef } from "react";
 
-const WS_URL = "ws://localhost:4400";
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:4400";
+
+function shortKey(pubkey) {
+  return pubkey.slice(0, 4) + "..." + pubkey.slice(-4);
+}
 
 export default function Chat({ session, onLogout }) {
   const [messages, setMessages] = useState([]);
@@ -21,9 +25,9 @@ export default function Chat({ session, onLogout }) {
       if (msg.type === "chat") {
         setMessages((prev) => [...prev, msg]);
       } else if (msg.type === "user_joined") {
-        setOnlineUsers((prev) => [...new Set([...prev, msg.username])]);
+        setOnlineUsers((prev) => [...new Set([...prev, msg.pubkey])]);
       } else if (msg.type === "user_left") {
-        setOnlineUsers((prev) => prev.filter((u) => u !== msg.username));
+        setOnlineUsers((prev) => prev.filter((u) => u !== msg.pubkey));
       }
     };
 
@@ -47,22 +51,16 @@ export default function Chat({ session, onLogout }) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <h2>torchat</h2>
-          <span className="user-badge">{session.username}</span>
+          <span className="user-badge" title={session.pubkey}>{shortKey(session.pubkey)}</span>
         </div>
         <div className="online-list">
           <h3>online</h3>
-          {onlineUsers.length === 0 && (
-            <p className="muted">no one else here yet</p>
-          )}
+          {onlineUsers.length === 0 && <p className="muted">no one else here yet</p>}
           {onlineUsers.map((u) => (
-            <div key={u} className="online-user">
-              {u}
-            </div>
+            <div key={u} className="online-user" title={u}>{shortKey(u)}</div>
           ))}
         </div>
-        <button className="logout-btn" onClick={onLogout}>
-          logout
-        </button>
+        <button className="logout-btn" onClick={onLogout}>logout</button>
       </aside>
 
       <main className="chat-main">
@@ -75,13 +73,11 @@ export default function Chat({ session, onLogout }) {
           {messages.map((m) => (
             <div
               key={m.id}
-              className={`msg ${m.from === session.username ? "msg-self" : "msg-other"}`}
+              className={`msg ${m.from === session.pubkey ? "msg-self" : "msg-other"}`}
             >
-              <span className="msg-author">{m.from}</span>
+              <span className="msg-author">{shortKey(m.from)}</span>
               <span className="msg-text">{m.text}</span>
-              <span className="msg-time">
-                {new Date(m.ts).toLocaleTimeString()}
-              </span>
+              <span className="msg-time">{new Date(m.ts).toLocaleTimeString()}</span>
             </div>
           ))}
           <div ref={bottomRef} />
