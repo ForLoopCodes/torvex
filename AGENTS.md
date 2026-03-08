@@ -89,7 +89,7 @@ torvex/
 │   └── mobile/                  (react native 0.84.1 — android only)
 │       ├── App.js               (root: auth gate, chat, qr scanner routing)
 │       ├── index.js             (entry + buffer polyfill)
-│       ├── metro.config.js
+│       ├── metro.config.js      (metro bundler config)
 │       ├── package.json
 │       ├── android/             (gradle build, native modules)
 │       └── src/
