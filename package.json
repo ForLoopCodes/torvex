@@ -9,6 +9,8 @@
     "build": "turbo run build"
   },
   "devDependencies": {
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.8",
     "turbo": "^2.8.14"
   }
 }
