@@ -11,7 +11,7 @@ torvex is a zero-knowledge encrypted chat with signal double ratchet, x3dh key a
 - **apps/web**: react + vite frontend (port 6767)
 - **database**: supabase postgresql via drizzle orm (ssl enforced)
 
-## current phase: 2.0 (signal protocol + full features)
+## current phase: 2.1 (crypto hardening + pin vault)
 
 ### cryptographic stack
 
@@ -26,14 +26,16 @@ torvex is a zero-knowledge encrypted chat with signal double ratchet, x3dh key a
 
 ### auth flow
 
-1. user generates/restores 24-word bip39 mnemonic, or connects phantom/metamask
+1. user creates or restores 24-word bip39 mnemonic (no phantom/metamask — app is its own wallet)
 2. bip44 derives 3 keypairs: identity (sign), encryption (x25519), prekey (x25519)
-3. sends identity pubkey to `POST /auth/challenge`
-4. server returns `torvex-auth:{32-byte-nonce}:{timestamp}` (30s ttl, one-time)
-5. client signs challenge, sends to `POST /auth/verify`
-6. server returns jwt (hs256, jti, 24h expiry)
-7. client generates signed prekey + 10 one-time prekeys, uploads to `POST /keys/bundle`
-8. client connects websocket with `?token=jwt&encPub=x25519PublicKey`
+3. user sets a pin (4-8 digits) — mnemonic encrypted via pbkdf2 + aes-gcm and stored in localStorage
+4. sends identity pubkey + device_id to `POST /auth/challenge`
+5. server returns `torvex-auth:{32-byte-nonce}:{timestamp}` (30s ttl, one-time)
+6. client signs challenge, sends to `POST /auth/verify` with device_id
+7. server returns jwt (hs256, jti, 24h expiry, sub=pubkey, did=device_id)
+8. client generates signed prekey + 10 one-time prekeys, uploads to `POST /keys/bundle`
+9. client connects websocket with `?token=jwt&encPub=x25519PublicKey`
+10. on reconnect, client checks otp count and auto-replenishes if below 5
 
 ### x3dh + double ratchet flow
 
@@ -82,15 +84,15 @@ torvex/
 │           │   ├── x3dh.js      (extended triple diffie-hellman)
 │           │   └── ratchet.js   (signal double ratchet protocol)
 │           └── views/
-│               ├── Auth.jsx     (seed + phantom + metamask auth + prekey upload)
-│               └── Chat.jsx     (double ratchet chat, reconnect, notifications, offline decrypt, history persistence)
+│               ├── Auth.jsx     (seed-only wallet auth + pin vault + prekey upload)
+│               └── Chat.jsx     (double ratchet chat, reconnect, notifications, otp replenish, history)
 ```
 
 ## security features
 
 | layer          | protection                                                                       |
 | -------------- | -------------------------------------------------------------------------------- |
-| auth           | jwt hs256 + jti + revocation, 30s one-time challenges, csprng nonces             |
+| auth           | jwt hs256 + jti + revocation + device_id, 30s one-time challenges, csprng nonces  |
 | http           | helmet (csp, hsts, xss, clickjack), cors lockdown, 8kb body limit, rate limiting |
 | websocket      | 10 msg/sec rate limit, 32kb max payload, 5 conn/ip, encpub validation            |
 | encryption     | signal double ratchet — per-message forward secrecy, x3dh session init           |
@@ -101,13 +103,15 @@ torvex/
 ## api endpoints
 
 - `POST /auth/challenge` — get one-time challenge for pubkey
-- `POST /auth/verify` — submit signed challenge for jwt
+- `POST /auth/verify` — submit signed challenge + device_id for jwt
 - `GET /auth/me` — verify jwt, get pubkey
 - `POST /auth/revoke` — revoke current jwt
 - `POST /keys/bundle` — upload prekey bundle (identity key, signed prekey, otps)
 - `GET /keys/bundle/:pubkey` — fetch peer's prekey bundle (consumes one otp)
 - `POST /profile/name` — set display name (max 32 chars)
 - `GET /profile/:pubkey` — get peer's display name
+- `GET /keys/count` — get unused otp count for authenticated user
+- `POST /keys/replenish` — upload new batch of otps (max 100)
 - `GET /messages/pending` — fetch offline messages (marks as delivered)
 
 ## ws message types
@@ -143,7 +147,9 @@ torvex/
 - functions <20 lines used once = inline them
 - strict ordering: imports → enums → structs → logic
 - env vars: backend uses `dotenv/config`, frontend uses `import.meta.env.VITE_*`
-- identity = base58 ed25519 pubkey OR 0x eth address
+- identity = base58 ed25519 pubkey only (no eth/metamask)
+- pin vault: pbkdf2 300k iterations + aes-gcm, stored in localStorage
+- device_id: crypto.randomUUID(), persisted in localStorage
 
 ## env vars
 
@@ -174,6 +180,9 @@ torvex/
 - display name editing (server-persisted, max 32 chars)
 - copy pubkey to clipboard
 - input disabled when ws disconnected
+- auto otp replenishment (checks count on ws connect, refills if < 5)
+- pin-encrypted key vault (pbkdf2 + aes-gcm, auto-unlock on revisit)
+- per-device identification (device_id in jwt + localStorage)
 
 ## next phases (from plan.md)
 
