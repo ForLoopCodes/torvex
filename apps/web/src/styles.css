@@ -352,60 +352,6 @@ button:hover {
   letter-spacing: 1px;
 }
 
-.btn-wallet {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 0.95rem;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  transition: all 0.2s;
-}
-
-.btn-wallet:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-phantom {
-  background: #ab9ff2;
-  color: #1a1a2e;
-}
-
-.btn-phantom:hover:not(:disabled) {
-  background: #9580e6;
-}
-
-.btn-metamask {
-  background: #f6851b;
-  color: #fff;
-}
-
-.btn-metamask:hover:not(:disabled) {
-  background: #e2761b;
-}
-
-.auth-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 20px 0;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.auth-divider::before,
-.auth-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-
 .msg-system {
   align-self: center;
   background: transparent;

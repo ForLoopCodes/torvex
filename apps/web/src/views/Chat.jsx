@@ -1,10 +1,11 @@
 // torvex web - encrypted chat with signal double ratchet
-// reconnect, notifications, offline decrypt, message persistence
+// reconnect, notifications, otp replenish, message persistence
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import bs58 from "bs58";
 import {
   generateEphemeralKey,
+  generateOneTimePrekeys,
   x3dhInitiator,
   x3dhResponder,
 } from "../crypto/x3dh.js";
@@ -25,6 +26,8 @@ const TYPING_TIMEOUT = 2000;
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 30000;
 const MAX_HISTORY = 200;
+const OTP_LOW_THRESHOLD = 5;
+const OTP_REPLENISH_COUNT = 10;
 
 function shortKey(pk) {
   return pk.slice(0, 4) + "..." + pk.slice(-4);
@@ -129,6 +132,31 @@ async function setMyDisplayName(token, name) {
     body: JSON.stringify({ displayName: name }),
   });
   return res.ok ? (await res.json()).displayName : null;
+}
+
+async function checkAndReplenishOtps(token) {
+  try {
+    const countRes = await fetch(`${API}/keys/count`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!countRes.ok) return;
+    const { count } = await countRes.json();
+    if (count >= OTP_LOW_THRESHOLD) return;
+    const otps = generateOneTimePrekeys(OTP_REPLENISH_COUNT);
+    await fetch(`${API}/keys/replenish`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        oneTimePrekeys: otps.map((k) => ({
+          id: k.id,
+          publicKey: bs58.encode(k.keyPair.publicKey),
+        })),
+      }),
+    });
+  } catch {}
 }
 
 export default function Chat({ session, onLogout }) {
@@ -479,6 +507,7 @@ export default function Chat({ session, onLogout }) {
       setWsStatus("connected");
       reconnectRef.current = 0;
       processOfflineMessages();
+      checkAndReplenishOtps(session.token);
     };
 
     ws.onmessage = handleMsg;

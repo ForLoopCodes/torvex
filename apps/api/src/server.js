@@ -1,4 +1,4 @@
-// torvex api - production-grade e2e encrypted relay
+// torvex api - e2e encrypted relay with device routing
 // hardened auth, ws protection, zero-knowledge message relay
 
 import "dotenv/config";
@@ -13,8 +13,7 @@ import nacl from "tweetnacl";
 import bs58 from "bs58";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
-import { verifyMessage } from "ethers";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "./db/index.js";
 import { users, messages, oneTimePrekeys } from "./db/schema.js";
 
@@ -114,10 +113,6 @@ function isValidPubkey(pk) {
   );
 }
 
-function isValidEthAddress(addr) {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr);
-}
-
 function clientIp(req) {
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
@@ -145,7 +140,7 @@ app.post("/auth/challenge", (req, res) => {
 });
 
 app.post("/auth/verify", async (req, res) => {
-  const { pubkey, signature } = req.body;
+  const { pubkey, signature, deviceId } = req.body;
 
   if (
     !pubkey ||
@@ -163,34 +158,25 @@ app.post("/auth/verify", async (req, res) => {
   challenges.delete(pubkey);
 
   try {
-    const isEth = pubkey.startsWith("0x");
-
-    if (isEth) {
-      if (!isValidEthAddress(pubkey))
-        return res.status(400).json({ error: "invalid address" });
-      const recovered = verifyMessage(entry.challenge, signature);
-      if (recovered.toLowerCase() !== pubkey.toLowerCase())
-        return res.status(401).json({ error: "bad signature" });
-    } else {
-      const sigBytes = bs58.decode(signature);
-      const pubBytes = bs58.decode(pubkey);
-      if (pubBytes.length !== 32)
-        return res.status(400).json({ error: "invalid pubkey length" });
-      if (sigBytes.length !== 64)
-        return res.status(400).json({ error: "invalid signature length" });
-      if (
-        !nacl.sign.detached.verify(
-          new TextEncoder().encode(entry.challenge),
-          sigBytes,
-          pubBytes,
-        )
+    const sigBytes = bs58.decode(signature);
+    const pubBytes = bs58.decode(pubkey);
+    if (pubBytes.length !== 32)
+      return res.status(400).json({ error: "invalid pubkey length" });
+    if (sigBytes.length !== 64)
+      return res.status(400).json({ error: "invalid signature length" });
+    if (
+      !nacl.sign.detached.verify(
+        new TextEncoder().encode(entry.challenge),
+        sigBytes,
+        pubBytes,
       )
-        return res.status(401).json({ error: "bad signature" });
-    }
+    )
+      return res.status(401).json({ error: "bad signature" });
 
+    const did = typeof deviceId === "string" && deviceId.length <= 64 ? deviceId : null;
     const jti = randomBytes(16).toString("hex");
     const token = jwt.sign(
-      { sub: pubkey, jti, iat: Math.floor(Date.now() / 1000) },
+      { sub: pubkey, jti, did, iat: Math.floor(Date.now() / 1000) },
       JWT_SECRET,
       {
         algorithm: "HS256",
@@ -204,7 +190,7 @@ app.post("/auth/verify", async (req, res) => {
       console.error(`[${req.id}] db user insert:`, e.message);
     }
 
-    res.json({ token, pubkey });
+    res.json({ token, pubkey, deviceId: did });
   } catch (e) {
     console.error(`[${req.id}] verify error:`, e.message);
     res.status(400).json({ error: "verification failed" });
@@ -378,6 +364,47 @@ app.get("/profile/:pubkey", authMiddleware, async (req, res) => {
   } catch (e) {
     console.error(`[${req.id}] get profile:`, e.message);
     res.status(500).json({ error: "fetch failed" });
+  }
+});
+
+app.get("/keys/count", authMiddleware, async (req, res) => {
+  try {
+    const [row] = await db
+      .select({ count: sql`count(*)::int` })
+      .from(oneTimePrekeys)
+      .where(and(eq(oneTimePrekeys.pubkey, req.pubkey), eq(oneTimePrekeys.used, false)));
+    res.json({ count: row?.count || 0 });
+  } catch (e) {
+    console.error(`[${req.id}] key count:`, e.message);
+    res.status(500).json({ error: "count failed" });
+  }
+});
+
+app.post("/keys/replenish", authMiddleware, async (req, res) => {
+  const { oneTimePrekeys: otps } = req.body;
+  if (!Array.isArray(otps) || otps.length === 0 || otps.length > 100)
+    return res.status(400).json({ error: "invalid prekeys" });
+  try {
+    const rows = otps
+      .filter(
+        (k) =>
+          typeof k.id === "number" &&
+          typeof k.publicKey === "string" &&
+          k.publicKey.length <= 128,
+      )
+      .map((k) => ({
+        id: `${req.pubkey}:${k.id}`,
+        pubkey: req.pubkey,
+        prekeyIndex: k.id,
+        publicKey: k.publicKey,
+        used: false,
+      }));
+    if (rows.length)
+      await db.insert(oneTimePrekeys).values(rows).onConflictDoNothing();
+    res.json({ ok: true, added: rows.length });
+  } catch (e) {
+    console.error(`[${req.id}] replenish:`, e.message);
+    res.status(500).json({ error: "replenish failed" });
   }
 });
 

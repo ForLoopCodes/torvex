@@ -1,8 +1,7 @@
-// torvex web - wallet auth with bip44 hd derivation
-// phantom, metamask, and seed phrase login with prekey upload
+// torvex web - self-contained bip39 wallet auth
+// pin-encrypted key storage, device id, prekey upload
 
-import React, { useState } from "react";
-import * as bip39 from "bip39";
+import React, { useState, useEffect } from "react";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import {
@@ -18,6 +17,60 @@ import {
 } from "../crypto/x3dh.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:4400";
+const VAULT_KEY = "torvex_vault";
+const DEVICE_KEY = "torvex_device_id";
+
+function getDeviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
+
+async function deriveEncKey(pin) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(pin),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode("torvex-vault-v1"), iterations: 300000, hash: "SHA-256" },
+    key,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+async function encryptVault(pin, mnemonic) {
+  const key = await deriveEncKey(pin);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(mnemonic),
+  );
+  const data = { iv: bs58.encode(iv), ct: bs58.encode(new Uint8Array(ct)) };
+  localStorage.setItem(VAULT_KEY, JSON.stringify(data));
+}
+
+async function decryptVault(pin) {
+  const raw = localStorage.getItem(VAULT_KEY);
+  if (!raw) return null;
+  const { iv, ct } = JSON.parse(raw);
+  const key = await deriveEncKey(pin);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: bs58.decode(iv) },
+    key,
+    bs58.decode(ct),
+  );
+  return new TextDecoder().decode(plain);
+}
 
 async function fetchChallenge(pubkey) {
   const res = await fetch(`${API}/auth/challenge`, {
@@ -30,18 +83,18 @@ async function fetchChallenge(pubkey) {
   return data.challenge;
 }
 
-async function verifySignature(pubkey, signature) {
+async function verifySignature(pubkey, signature, deviceId) {
   const res = await fetch(`${API}/auth/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pubkey, signature }),
+    body: JSON.stringify({ pubkey, signature, deviceId }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error);
   return data;
 }
 
-async function uploadPrekeyBundle(token, bundle) {
+async function uploadPrekeyBundle(token, bundle, deviceId) {
   await fetch(`${API}/keys/bundle`, {
     method: "POST",
     headers: {
@@ -49,6 +102,7 @@ async function uploadPrekeyBundle(token, bundle) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
+      deviceId,
       identityKey: bs58.encode(bundle.identityKey),
       signedPrekey: bs58.encode(bundle.signedPrekey),
       signedPrekeySig: bs58.encode(bundle.signedPrekeySignature),
@@ -62,14 +116,20 @@ async function uploadPrekeyBundle(token, bundle) {
 
 export default function Auth({ onAuth }) {
   const [mnemonic, setMnemonic] = useState("");
+  const [pin, setPin] = useState("");
   const [phase, setPhase] = useState("start");
   const [error, setError] = useState("");
   const [generatedPhrase, setGeneratedPhrase] = useState("");
-  const [loading, setLoading] = useState("");
+  const [hasVault, setHasVault] = useState(false);
 
-  async function signInWithSeed(phrase) {
+  useEffect(() => {
+    setHasVault(!!localStorage.getItem(VAULT_KEY));
+  }, []);
+
+  async function authenticate(phrase, userPin) {
     setError("");
     try {
+      const deviceId = getDeviceId();
       const keys = deriveAllKeys(phrase);
       const pubkey = pubkeyB58(keys.identity);
       const challenge = await fetchChallenge(pubkey);
@@ -79,17 +139,19 @@ export default function Auth({ onAuth }) {
           keys.identity.secretKey,
         ),
       );
-      const data = await verifySignature(pubkey, signature);
+      const data = await verifySignature(pubkey, signature, deviceId);
 
       const signedPre = generateSignedPrekey(keys.identity.secretKey);
       const otps = generateOneTimePrekeys(10);
       const bundle = createPrekeyBundle(keys.identity, signedPre, otps);
-      await uploadPrekeyBundle(data.token, bundle);
+      await uploadPrekeyBundle(data.token, bundle, deviceId);
+
+      await encryptVault(userPin, phrase);
 
       onAuth({
         token: data.token,
         pubkey: data.pubkey,
-        mnemonic: phrase,
+        deviceId,
         keys,
         signedPrekey: signedPre,
         oneTimePrekeys: otps,
@@ -99,69 +161,46 @@ export default function Auth({ onAuth }) {
     }
   }
 
-  async function signInWithPhantom() {
+  async function unlockVault() {
     setError("");
-    setLoading("phantom");
+    if (!pin || pin.length < 4) return setError("pin must be at least 4 digits");
     try {
-      const phantom = window?.solana;
-      if (!phantom?.isPhantom)
-        throw new Error(
-          "phantom wallet not found — install it from phantom.app",
-        );
-      const resp = await phantom.connect();
-      const pubkey = resp.publicKey.toString();
-      const challenge = await fetchChallenge(pubkey);
-      const { signature } = await phantom.signMessage(
-        new TextEncoder().encode(challenge),
-        "utf8",
-      );
-      const data = await verifySignature(pubkey, bs58.encode(signature));
-      const ephEncrypt = nacl.box.keyPair();
-      onAuth({
-        token: data.token,
-        pubkey: data.pubkey,
-        mnemonic: null,
-        keys: { identity: null, encryption: ephEncrypt, prekey: null },
-        signedPrekey: null,
-        oneTimePrekeys: null,
-      });
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading("");
+      const phrase = await decryptVault(pin);
+      if (!phrase) return setError("no saved wallet found");
+      await authenticate(phrase, pin);
+    } catch {
+      setError("wrong pin or corrupted vault");
     }
   }
 
-  async function signInWithMetaMask() {
-    setError("");
-    setLoading("metamask");
-    try {
-      if (!window?.ethereum?.isMetaMask)
-        throw new Error("metamask not found — install it from metamask.io");
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
-      });
-      const address = accounts[0];
-      const challenge = await fetchChallenge(address);
-      const signature = await window.ethereum.request({
-        method: "personal_sign",
-        params: [challenge, address],
-      });
-      const data = await verifySignature(address, signature);
-      const ephEncrypt = nacl.box.keyPair();
-      onAuth({
-        token: data.token,
-        pubkey: data.pubkey,
-        mnemonic: null,
-        keys: { identity: null, encryption: ephEncrypt, prekey: null },
-        signedPrekey: null,
-        oneTimePrekeys: null,
-      });
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading("");
-    }
+  function clearVault() {
+    localStorage.removeItem(VAULT_KEY);
+    setHasVault(false);
+    setPhase("start");
+  }
+
+  if (hasVault && phase === "start") {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card">
+          <h1 className="logo">torvex</h1>
+          <p className="tagline">enter your pin to unlock</p>
+          <input
+            type="password"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            placeholder="pin code"
+            maxLength={8}
+            onKeyDown={(e) => e.key === "Enter" && unlockVault()}
+          />
+          {error && <p className="error">{error}</p>}
+          <button onClick={unlockVault}>unlock</button>
+          <p className="switch" onClick={clearVault}>
+            use different wallet
+          </p>
+        </div>
+      </div>
+    );
   }
 
   if (phase === "generated") {
@@ -181,10 +220,23 @@ export default function Auth({ onAuth }) {
             write this down. it is your only login. lose it and you lose access
             forever.
           </p>
-          <button onClick={() => signInWithSeed(generatedPhrase)}>
+          <p className="tagline">set a pin to encrypt your keys locally</p>
+          <input
+            type="password"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            placeholder="pin code (4+ digits)"
+            maxLength={8}
+          />
+          {error && <p className="error">{error}</p>}
+          <button
+            onClick={() => {
+              if (pin.length < 4) return setError("pin must be at least 4 digits");
+              authenticate(generatedPhrase, pin);
+            }}
+          >
             i saved it — sign in
           </button>
-          {error && <p className="error">{error}</p>}
           <p className="switch" onClick={() => setPhase("start")}>
             back
           </p>
@@ -206,12 +258,21 @@ export default function Auth({ onAuth }) {
             value={mnemonic}
             onChange={(e) => setMnemonic(e.target.value.toLowerCase())}
           />
+          <p className="tagline">set a pin to encrypt your keys locally</p>
+          <input
+            type="password"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            placeholder="pin code (4+ digits)"
+            maxLength={8}
+          />
           {error && <p className="error">{error}</p>}
           <button
             onClick={() => {
               if (!validateMnemonic(mnemonic.trim()))
                 return setError("invalid seed phrase");
-              signInWithSeed(mnemonic.trim());
+              if (pin.length < 4) return setError("pin must be at least 4 digits");
+              authenticate(mnemonic.trim(), pin);
             }}
           >
             sign in with seed
@@ -230,27 +291,6 @@ export default function Auth({ onAuth }) {
         <h1 className="logo">torvex</h1>
         <p className="tagline">encrypted. anonymous. yours.</p>
         <div className="auth-section">
-          <h3 className="section-label">wallet extensions</h3>
-          <button
-            className="btn-wallet btn-phantom"
-            onClick={signInWithPhantom}
-            disabled={!!loading}
-          >
-            {loading === "phantom" ? "connecting..." : "sign in with phantom"}
-          </button>
-          <button
-            className="btn-wallet btn-metamask"
-            onClick={signInWithMetaMask}
-            disabled={!!loading}
-          >
-            {loading === "metamask" ? "connecting..." : "sign in with metamask"}
-          </button>
-        </div>
-        <div className="auth-divider">
-          <span>or</span>
-        </div>
-        <div className="auth-section">
-          <h3 className="section-label">seed phrase</h3>
           <button
             onClick={() => {
               setGeneratedPhrase(generateMnemonic());
