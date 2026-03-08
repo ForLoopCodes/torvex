@@ -12,13 +12,13 @@ encrypted, anonymous chat powered by wallet-based identity. no passwords, no ema
 
 ## stack
 
-| layer | tech |
-|---|---|
-| frontend | react + vite |
-| backend | node.js + express + ws |
+| layer    | tech                                  |
+| -------- | ------------------------------------- |
+| frontend | react + vite                          |
+| backend  | node.js + express + ws                |
 | database | supabase (postgresql) via drizzle orm |
-| crypto | bip39, tweetnacl (ed25519), bs58 |
-| monorepo | npm workspaces + turborepo |
+| crypto   | bip39, tweetnacl (ed25519), bs58      |
+| monorepo | npm workspaces + turborepo            |
 
 ## setup
 
@@ -30,6 +30,7 @@ npm install
 ### configure environment
 
 **`apps/api/.env`**
+
 ```
 PORT=4400
 DATABASE_URL=postgresql://postgres:YOUR-PASSWORD@db.YOUR-PROJECT.supabase.co:5432/postgres
@@ -38,6 +39,7 @@ DATABASE_URL=postgresql://postgres:YOUR-PASSWORD@db.YOUR-PROJECT.supabase.co:543
 get your connection string from [supabase dashboard](https://supabase.com/dashboard) → project settings → database → connection string (uri)
 
 **`apps/web/.env`** (defaults work for local dev)
+
 ```
 VITE_API_URL=http://localhost:4400
 VITE_WS_URL=ws://localhost:4400
