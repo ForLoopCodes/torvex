@@ -1,0 +1,277 @@
+/* torchat web - global styles */
+/* dark theme chat ui with sidebar layout */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --border: #1e1e2e;
+  --text: #e4e4ef;
+  --muted: #6b6b80;
+  --accent: #7c5cfc;
+  --accent-hover: #6a4ae0;
+  --self-bg: #1a1a2e;
+  --other-bg: #161622;
+  --danger: #e05555;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+}
+
+input,
+button {
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 16px;
+  border-radius: 8px;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.2s;
+}
+
+input:focus {
+  border-color: var(--accent);
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: var(--accent-hover);
+}
+
+.auth-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 48px 40px;
+  width: 380px;
+  text-align: center;
+}
+
+.logo {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -1px;
+  color: var(--accent);
+}
+
+.tagline {
+  color: var(--muted);
+  margin: 8px 0 32px;
+  font-size: 0.9rem;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-card button {
+  margin-top: 8px;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.switch {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.switch:hover {
+  color: var(--accent);
+}
+
+.chat-layout {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 260px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.sidebar-header h2 {
+  font-size: 1.3rem;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+}
+
+.user-badge {
+  background: var(--border);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.online-list {
+  flex: 1;
+}
+
+.online-list h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.online-user {
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  font-size: 0.9rem;
+}
+
+.online-user:hover {
+  background: var(--border);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.logout-btn {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  padding: 8px;
+  font-size: 0.85rem;
+}
+
+.logout-btn:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty-chat {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.msg {
+  max-width: 65%;
+  padding: 10px 16px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-self {
+  align-self: flex-end;
+  background: var(--self-bg);
+  border: 1px solid var(--border);
+}
+
+.msg-other {
+  align-self: flex-start;
+  background: var(--other-bg);
+  border: 1px solid var(--border);
+}
+
+.msg-author {
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.msg-text {
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.msg-time {
+  font-size: 0.7rem;
+  color: var(--muted);
+  align-self: flex-end;
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.chat-input input {
+  flex: 1;
+}
+
+.chat-input button {
+  width: 80px;
+}
