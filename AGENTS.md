@@ -160,6 +160,21 @@ torvex/
 - `VITE_API_URL` — backend http url
 - `VITE_WS_URL` — backend websocket url
 
+## chat features (web client)
+
+- per-peer encrypted messaging with double ratchet
+- ws auto-reconnect with exponential backoff (1s–30s)
+- browser notifications (permission prompt, fires when tab hidden)
+- offline message decryption (fetches pending on connect)
+- per-peer message history (localStorage, 200 msgs/peer max)
+- unread badges per contact (clears on select)
+- typing indicators (2s debounce, auto-expire)
+- read receipts (✓ sent, ✓✓ read)
+- contact management (add by pubkey, auto-add on x3dh_init)
+- display name editing (server-persisted, max 32 chars)
+- copy pubkey to clipboard
+- input disabled when ws disconnected
+
 ## next phases (from plan.md)
 
 - **phase 2**: react native android port + qr code scanning
