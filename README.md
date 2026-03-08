@@ -99,4 +99,4 @@ torvex/
 
 ## license
 
-mit
+[Source Available License](LICENSE) — source viewable, no commercial use, modification, or distribution without permission.
