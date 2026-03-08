@@ -14,8 +14,9 @@ import bs58 from "bs58";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { verifyMessage } from "ethers";
+import { eq, and } from "drizzle-orm";
 import { db } from "./db/index.js";
-import { users, messages } from "./db/schema.js";
+import { users, messages, oneTimePrekeys } from "./db/schema.js";
 
 const PORT = process.env.PORT || 4400;
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -228,6 +229,73 @@ app.post("/auth/revoke", (req, res) => {
   res.json({ ok: true });
 });
 
+function authMiddleware(req, res, next) {
+  const payload = verifyToken(req.headers.authorization?.replace("Bearer ", ""));
+  if (!payload) return res.status(401).json({ error: "unauthorized" });
+  req.pubkey = payload.sub;
+  next();
+}
+
+app.post("/keys/bundle", authMiddleware, async (req, res) => {
+  const { identityKey, signedPrekey, signedPrekeySig, oneTimePrekeys: otps } = req.body;
+
+  if (!identityKey || !signedPrekey || !signedPrekeySig)
+    return res.status(400).json({ error: "missing prekey fields" });
+  if (typeof identityKey !== "string" || typeof signedPrekey !== "string" || typeof signedPrekeySig !== "string")
+    return res.status(400).json({ error: "invalid prekey types" });
+  if (identityKey.length > 128 || signedPrekey.length > 128 || signedPrekeySig.length > 256)
+    return res.status(400).json({ error: "prekey too large" });
+
+  try {
+    await db.update(users).set({ identityKey, signedPrekey, signedPrekeySig }).where(eq(users.pubkey, req.pubkey));
+
+    if (Array.isArray(otps) && otps.length > 0 && otps.length <= 100) {
+      const rows = otps
+        .filter((k) => typeof k.id === "number" && typeof k.publicKey === "string" && k.publicKey.length <= 128)
+        .map((k) => ({ id: `${req.pubkey}:${k.id}`, pubkey: req.pubkey, prekeyIndex: k.id, publicKey: k.publicKey, used: false }));
+      if (rows.length) await db.insert(oneTimePrekeys).values(rows).onConflictDoNothing();
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(`[${req.id}] bundle upload:`, e.message);
+    res.status(500).json({ error: "bundle upload failed" });
+  }
+});
+
+app.get("/keys/bundle/:pubkey", authMiddleware, async (req, res) => {
+  const target = req.params.pubkey;
+  if (!isValidPubkey(target)) return res.status(400).json({ error: "invalid pubkey" });
+
+  try {
+    const [user] = await db.select({
+      identityKey: users.identityKey,
+      signedPrekey: users.signedPrekey,
+      signedPrekeySig: users.signedPrekeySig,
+    }).from(users).where(eq(users.pubkey, target)).limit(1);
+
+    if (!user?.identityKey) return res.status(404).json({ error: "no bundle" });
+
+    const [otp] = await db.select({
+      id: oneTimePrekeys.id,
+      prekeyIndex: oneTimePrekeys.prekeyIndex,
+      publicKey: oneTimePrekeys.publicKey,
+    }).from(oneTimePrekeys).where(and(eq(oneTimePrekeys.pubkey, target), eq(oneTimePrekeys.used, false))).limit(1);
+
+    if (otp) await db.update(oneTimePrekeys).set({ used: true }).where(eq(oneTimePrekeys.id, otp.id));
+
+    res.json({
+      identityKey: user.identityKey,
+      signedPrekey: user.signedPrekey,
+      signedPrekeySig: user.signedPrekeySig,
+      oneTimePrekey: otp ? { id: otp.prekeyIndex, publicKey: otp.publicKey } : null,
+    });
+  } catch (e) {
+    console.error(`[${req.id}] bundle fetch:`, e.message);
+    res.status(500).json({ error: "bundle fetch failed" });
+  }
+});
+
 app.use((err, req, res, _next) => {
   console.error(`[${req.id}] unhandled:`, err.message);
   res.status(500).json({ error: "internal error" });
@@ -332,6 +400,25 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
+      if (msg.type === "x3dh_init") {
+        if (!msg.to || typeof msg.to !== "string" || !isValidPubkey(msg.to)) return;
+        if (!msg.identityKey || !msg.ephemeralKey || typeof msg.header !== "object") return;
+        const target = sockets.get(msg.to);
+        if (target?.readyState === 1) {
+          target.send(JSON.stringify({
+            type: "x3dh_init",
+            from: pubkey,
+            identityKey: msg.identityKey,
+            ephemeralKey: msg.ephemeralKey,
+            usedOnePrekeyId: msg.usedOnePrekeyId ?? null,
+            header: msg.header,
+            nonce: msg.nonce,
+            ciphertext: msg.ciphertext,
+          }));
+        }
+        return;
+      }
+
       if (msg.type !== "chat") return;
 
       if (
@@ -351,25 +438,23 @@ wss.on("connection", (ws, req) => {
       const ts = Date.now();
 
       for (const r of msg.recipients) {
-        if (!r.to || !r.nonce || !r.ciphertext) continue;
-        if (
-          typeof r.to !== "string" ||
-          typeof r.nonce !== "string" ||
-          typeof r.ciphertext !== "string"
-        )
-          continue;
+        if (!r.to || typeof r.to !== "string") continue;
+        if (!r.nonce || !r.ciphertext) continue;
+        if (typeof r.nonce !== "string" || typeof r.ciphertext !== "string") continue;
         if (r.nonce.length > 128 || r.ciphertext.length > 16384) continue;
+
+        const payload = {
+          type: "chat",
+          id: msgId,
+          from: pubkey,
+          nonce: r.nonce,
+          ciphertext: r.ciphertext,
+          ts,
+        };
+        if (r.header && typeof r.header === "object") payload.header = r.header;
+
         if (sockets.has(r.to) && sockets.get(r.to).readyState === 1) {
-          sockets.get(r.to).send(
-            JSON.stringify({
-              type: "chat",
-              id: msgId,
-              from: pubkey,
-              nonce: r.nonce,
-              ciphertext: r.ciphertext,
-              ts,
-            }),
-          );
+          sockets.get(r.to).send(JSON.stringify(payload));
         }
       }
 

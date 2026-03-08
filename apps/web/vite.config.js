@@ -15,6 +15,7 @@ export default defineConfig({
     port: 6767,
     proxy: {
       "/auth": "http://localhost:4400",
+      "/keys": "http://localhost:4400",
     },
   },
 });
