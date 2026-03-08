@@ -55,7 +55,10 @@ app.post("/auth/verify", async (req, res) => {
 
     try {
       await db.insert(users).values({ pubkey }).onConflictDoNothing();
-    } catch {}
+      console.log("user saved:", pubkey.slice(0, 8));
+    } catch (e) {
+      console.error("db user insert error:", e.message);
+    }
 
     res.json({ token, pubkey });
   } catch (err) {
@@ -122,7 +125,10 @@ wss.on("connection", (ws, req) => {
             toPubkey: msg.to || null,
             ciphertext: msg.text,
           });
-        } catch {}
+          console.log("msg saved:", payload.id);
+        } catch (e) {
+          console.error("db msg insert error:", e.message);
+        }
       }
     } catch {}
   });

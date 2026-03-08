@@ -5,9 +5,6 @@ import React, { useState } from "react";
 import * as bip39 from "bip39";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
-import { Buffer } from "buffer";
-
-window.Buffer = Buffer;
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:4400";
 

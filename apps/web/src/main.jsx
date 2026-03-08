@@ -1,6 +1,7 @@
 // torvex web - react entry point
 // mounts root app component to dom
 
+import "./polyfills.js";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
