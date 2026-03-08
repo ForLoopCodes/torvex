@@ -2,7 +2,7 @@
 
 ## project overview
 
-torvex is a zero-knowledge encrypted chat app with wallet-based auth. no passwords, no emails, no plaintext on server. messages are end-to-end encrypted with nacl.box (Curve25519-XSalsa20-Poly1305). the server is a dumb relay that never sees message content.
+torvex is a zero-knowledge encrypted chat with signal double ratchet, x3dh key agreement, and bip44 hd wallet auth. server never sees plaintext — stores only `[e2e:N]`. forward secrecy guaranteed via per-message dh ratchet steps.
 
 ## architecture
 
@@ -11,43 +11,40 @@ torvex is a zero-knowledge encrypted chat app with wallet-based auth. no passwor
 - **apps/web**: react + vite frontend (port 6767)
 - **database**: supabase postgresql via drizzle orm (ssl enforced)
 
-## current phase: 1.5+ (hardened auth + e2e encryption)
+## current phase: 1.5+ (signal protocol + bip44)
 
-### what's built
+### cryptographic stack
 
-- bip39 24-word seed phrase wallet generation
-- phantom (solana) + metamask (ethereum) wallet extension sign-in
-- ed25519 + secp256k1 challenge-response auth
-- jwt tokens with hs256, jti, 24h expiry, revocation
-- rate limiting (10/min on auth endpoints)
-- e2e encrypted chat — nacl.box per-recipient encryption
-- x25519 key exchange via websocket
-- zero-knowledge server — db stores only `[e2e:N]`
-- websocket rate limiting (10 msg/sec), payload limits (32kb)
-- per-ip connection limiting (5 max)
-- helmet security headers (csp, hsts, referrer-policy)
-- graceful shutdown handlers
+| protocol | implementation | purpose |
+|---|---|---|
+| bip44/slip-0010 | `crypto/keys.js` | hd key derivation — `m/44'/888'/N'/0'` paths for sign, encrypt, prekey |
+| x3dh | `crypto/x3dh.js` | initial session key agreement with prekey bundles |
+| double ratchet | `crypto/ratchet.js` | forward secrecy — per-message kdf chains + dh ratchet steps |
+| nacl.secretbox | ratchet message encryption | xsalsa20-poly1305 symmetric encryption with ratchet-derived keys |
+| nacl.box | x3dh dh operations | curve25519 diffie-hellman for shared secret derivation |
+| hkdf-sha256 | `@noble/hashes` | kdf for root chain, message chain, x3dh shared secret |
 
 ### auth flow
 
 1. user generates/restores 24-word bip39 mnemonic, or connects phantom/metamask
-2. derives ed25519 signing keypair + x25519 encryption keypair from seed (wallet extensions get ephemeral x25519)
-3. sends identity (pubkey or eth address) to `POST /auth/challenge`
+2. bip44 derives 3 keypairs: identity (sign), encryption (x25519), prekey (x25519)
+3. sends identity pubkey to `POST /auth/challenge`
 4. server returns `torvex-auth:{32-byte-nonce}:{timestamp}` (30s ttl, one-time)
-5. client signs challenge with private key (ed25519 or personal_sign)
-6. sends to `POST /auth/verify` — server validates signature type (0x prefix = eth, else ed25519)
-7. server returns jwt (hs256, jti, 24h expiry)
+5. client signs challenge, sends to `POST /auth/verify`
+6. server returns jwt (hs256, jti, 24h expiry)
+7. client generates signed prekey + 10 one-time prekeys, uploads to `POST /keys/bundle`
 8. client connects websocket with `?token=jwt&encPub=x25519PublicKey`
-9. server broadcasts x25519 pubkeys to all peers for key exchange
 
-### e2e encryption flow
+### x3dh + double ratchet flow
 
-1. each client generates x25519 keypair (deterministic from seed, or ephemeral for wallet extensions)
-2. on ws connect, x25519 pubkeys exchanged via `key_announce` messages
-3. sender encrypts message per-recipient: `nacl.box(msg, nonce, recipientPub, senderSecret)`
-4. server relays encrypted blobs to each recipient, stores only `[e2e:N]` in db
-5. recipient decrypts: `nacl.box.open(ciphertext, nonce, senderPub, recipientSecret)`
-6. server sends `chat_ack` to sender (no plaintext echoed back)
+1. alice clicks bob in sidebar → fetches bob's prekey bundle via `GET /keys/bundle/:pubkey`
+2. alice runs `x3dhInitiator()` — 3 or 4 dh computations → hkdf → shared secret
+3. alice inits sender ratchet with `initSender(sharedSecret, bob.signedPrekey)`
+4. alice sends `x3dh_init` ws message with ephemeral key + first encrypted message
+5. bob receives, runs `x3dhResponder()` → same shared secret, inits receiver ratchet
+6. subsequent messages: `ratchetEncrypt()` / `ratchetDecrypt()` — dh ratchet step on direction change
+7. each message gets unique key from kdf chain — forward secrecy + post-compromise security
+8. ratchet states persisted in sessionStorage per peer
 
 ## file structure
 
@@ -65,13 +62,14 @@ torvex/
 │   │   ├── drizzle.config.js
 │   │   ├── package.json
 │   │   └── src/
-│   │       ├── server.js        (express + ws + hardened auth + encrypted relay)
+│   │       ├── server.js        (express + ws + auth + prekey endpoints + encrypted relay)
 │   │       └── db/
 │   │           ├── index.js     (drizzle client, ssl, pooling)
-│   │           └── schema.js    (users, messages tables)
+│   │           ├── schema.js    (users, messages, one_time_prekeys)
+│   │           └── push.js      (manual schema push — drizzle-kit node v24 workaround)
 │   └── web/
 │       ├── .env                 (VITE_API_URL, VITE_WS_URL)
-│       ├── vite.config.js       (buffer polyfill, proxy)
+│       ├── vite.config.js       (buffer polyfill, proxy /auth + /keys)
 │       ├── index.html
 │       ├── package.json
 │       └── src/
@@ -79,9 +77,13 @@ torvex/
 │           ├── main.jsx
 │           ├── App.jsx
 │           ├── styles.css       (dark theme, wallet buttons)
+│           ├── crypto/
+│           │   ├── keys.js      (bip44 slip-0010 hd derivation)
+│           │   ├── x3dh.js      (extended triple diffie-hellman)
+│           │   └── ratchet.js   (signal double ratchet protocol)
 │           └── views/
-│               ├── Auth.jsx     (seed + phantom + metamask auth)
-│               └── Chat.jsx     (e2e encrypted ws chat)
+│               ├── Auth.jsx     (seed + phantom + metamask auth + prekey upload)
+│               └── Chat.jsx     (double ratchet encrypted chat with per-peer sessions)
 ```
 
 ## security features
@@ -91,9 +93,45 @@ torvex/
 | auth | jwt hs256 + jti + revocation, 30s one-time challenges, csprng nonces |
 | http | helmet (csp, hsts, xss, clickjack), cors lockdown, 8kb body limit, rate limiting |
 | websocket | 10 msg/sec rate limit, 32kb max payload, 5 conn/ip, encpub validation |
-| encryption | nacl.box (curve25519-xsalsa20-poly1305), per-recipient, client-side only |
+| encryption | signal double ratchet — per-message forward secrecy, x3dh session init |
+| key derivation | bip44/slip-0010 — deterministic hd paths from 24-word mnemonic |
 | database | ssl enforced, only `[e2e:N]` stored, connection pooling (max 10) |
 | operational | graceful shutdown, request id tracing, no error detail leakage |
+
+## api endpoints
+
+- `POST /auth/challenge` — get one-time challenge for pubkey
+- `POST /auth/verify` — submit signed challenge for jwt
+- `GET /auth/me` — verify jwt, get pubkey
+- `POST /auth/revoke` — revoke current jwt
+- `POST /keys/bundle` — upload prekey bundle (identity key, signed prekey, otps)
+- `GET /keys/bundle/:pubkey` — fetch peer's prekey bundle (consumes one otp)
+- `POST /profile/name` — set display name (max 32 chars)
+- `GET /profile/:pubkey` — get peer's display name
+- `GET /messages/pending` — fetch offline messages (marks as delivered)
+
+## ws message types
+
+- `user_joined` — new user connected (includes encPub)
+- `user_left` — user disconnected
+- `key_announce` — x25519 key exchange
+- `x3dh_init` — x3dh session establishment (ephemeral key + first ratchet message)
+- `chat` — ratchet-encrypted message (header.dh + header.n + header.pn + nonce + ciphertext)
+- `chat_ack` — server confirms message relay
+- `typing` — typing indicator (from, active bool)
+- `read` — read receipt (from, msgId)
+- `error` — rate limit or validation error
+
+## db schema
+
+### users
+- `pubkey` (pk), `display_name`, `identity_key`, `signed_prekey`, `signed_prekey_sig`, `created_at`
+
+### one_time_prekeys
+- `id` (pk), `pubkey` (fk→users), `prekey_index`, `public_key`, `used`, `created_at`
+
+### messages
+- `id` (pk), `from_pubkey` (fk→users), `to_pubkey` (fk→users), `ciphertext`, `delivered`, `created_at`
 
 ## key conventions
 
@@ -117,22 +155,6 @@ torvex/
 - `VITE_API_URL` — backend http url
 - `VITE_WS_URL` — backend websocket url
 
-## api endpoints
-
-- `POST /auth/challenge` — get one-time challenge for pubkey
-- `POST /auth/verify` — submit signed challenge for jwt
-- `GET /auth/me` — verify jwt, get pubkey
-- `POST /auth/revoke` — revoke current jwt
-
-## ws message types
-
-- `user_joined` — new user connected (includes encPub)
-- `user_left` — user disconnected
-- `key_announce` — x25519 key exchange
-- `chat` — encrypted message (nonce + ciphertext per recipient)
-- `chat_ack` — server confirms message relay
-- `error` — rate limit or validation error
-
 ## next phases (from plan.md)
 
 - **phase 2**: react native android port + qr code scanning
@@ -144,6 +166,7 @@ torvex/
 
 ```bash
 npm install
+cd apps/api && node src/db/push.js
 cd apps/api && node src/server.js
 cd apps/web && npx vite --host
 ```

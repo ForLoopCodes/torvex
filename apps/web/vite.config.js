@@ -16,6 +16,8 @@ export default defineConfig({
     proxy: {
       "/auth": "http://localhost:4400",
       "/keys": "http://localhost:4400",
+      "/profile": "http://localhost:4400",
+      "/messages": "http://localhost:4400",
     },
   },
 });

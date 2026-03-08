@@ -37,14 +37,21 @@ function encrypt(key, plaintext) {
 }
 
 function decrypt(key, nonce, ciphertext) {
-  const plain = nacl.secretbox.open(bs58.decode(ciphertext), bs58.decode(nonce), key);
+  const plain = nacl.secretbox.open(
+    bs58.decode(ciphertext),
+    bs58.decode(nonce),
+    key,
+  );
   if (!plain) throw new Error("decryption failed");
   return new TextDecoder().decode(plain);
 }
 
 export function initSender(sharedSecret, theirRatchetPub) {
   const dhSelf = dhKeyPair();
-  const { rootKey, chainKey } = kdfRoot(new Uint8Array(sharedSecret), dhShared(dhSelf.secretKey, theirRatchetPub));
+  const { rootKey, chainKey } = kdfRoot(
+    new Uint8Array(sharedSecret),
+    dhShared(dhSelf.secretKey, theirRatchetPub),
+  );
 
   return {
     dhSelf,
@@ -74,7 +81,8 @@ export function initReceiver(sharedSecret, dhSelf) {
 }
 
 function skipKeys(state, until) {
-  if (until - state.recvChain.n > MAX_SKIP) throw new Error("too many skipped messages");
+  if (until - state.recvChain.n > MAX_SKIP)
+    throw new Error("too many skipped messages");
   while (state.recvChain.n < until) {
     const { chainKey, messageKey } = kdfChain(state.recvChain.key);
     const skippedId = `${bs58.encode(state.dhRemote)}:${state.recvChain.n}`;
@@ -128,7 +136,8 @@ export function ratchetDecrypt(state, header, nonce, ciphertext) {
     return decrypt(mk, nonce, ciphertext);
   }
 
-  const isNewRatchet = !state.dhRemote || !arraysEqual(theirPub, state.dhRemote);
+  const isNewRatchet =
+    !state.dhRemote || !arraysEqual(theirPub, state.dhRemote);
 
   if (isNewRatchet) {
     if (state.recvChain) skipKeys(state, header.pn);
@@ -160,8 +169,12 @@ export function serializeState(state) {
     dhSelfSec: bs58.encode(state.dhSelf.secretKey),
     dhRemote: state.dhRemote ? bs58.encode(state.dhRemote) : null,
     rootKey: bs58.encode(state.rootKey),
-    sendChain: state.sendChain ? { key: bs58.encode(state.sendChain.key), n: state.sendChain.n } : null,
-    recvChain: state.recvChain ? { key: bs58.encode(state.recvChain.key), n: state.recvChain.n } : null,
+    sendChain: state.sendChain
+      ? { key: bs58.encode(state.sendChain.key), n: state.sendChain.n }
+      : null,
+    recvChain: state.recvChain
+      ? { key: bs58.encode(state.recvChain.key), n: state.recvChain.n }
+      : null,
     skipped,
     sendCount: state.sendCount,
     recvCount: state.recvCount,
@@ -172,7 +185,8 @@ export function serializeState(state) {
 export function deserializeState(json) {
   const d = JSON.parse(json);
   const skippedKeys = new Map();
-  for (const [k, v] of Object.entries(d.skipped)) skippedKeys.set(k, bs58.decode(v));
+  for (const [k, v] of Object.entries(d.skipped))
+    skippedKeys.set(k, bs58.decode(v));
 
   return {
     dhSelf: {
@@ -181,8 +195,12 @@ export function deserializeState(json) {
     },
     dhRemote: d.dhRemote ? bs58.decode(d.dhRemote) : null,
     rootKey: bs58.decode(d.rootKey),
-    sendChain: d.sendChain ? { key: bs58.decode(d.sendChain.key), n: d.sendChain.n } : null,
-    recvChain: d.recvChain ? { key: bs58.decode(d.recvChain.key), n: d.recvChain.n } : null,
+    sendChain: d.sendChain
+      ? { key: bs58.decode(d.sendChain.key), n: d.sendChain.n }
+      : null,
+    recvChain: d.recvChain
+      ? { key: bs58.decode(d.recvChain.key), n: d.recvChain.n }
+      : null,
     skippedKeys,
     sendCount: d.sendCount,
     recvCount: d.recvCount,

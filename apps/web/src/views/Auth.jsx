@@ -5,8 +5,17 @@ import React, { useState } from "react";
 import * as bip39 from "bip39";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
-import { deriveAllKeys, pubkeyB58, generateMnemonic, validateMnemonic } from "../crypto/keys.js";
-import { generateSignedPrekey, generateOneTimePrekeys, createPrekeyBundle } from "../crypto/x3dh.js";
+import {
+  deriveAllKeys,
+  pubkeyB58,
+  generateMnemonic,
+  validateMnemonic,
+} from "../crypto/keys.js";
+import {
+  generateSignedPrekey,
+  generateOneTimePrekeys,
+  createPrekeyBundle,
+} from "../crypto/x3dh.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:4400";
 
@@ -35,12 +44,18 @@ async function verifySignature(pubkey, signature) {
 async function uploadPrekeyBundle(token, bundle) {
   await fetch(`${API}/keys/bundle`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({
       identityKey: bs58.encode(bundle.identityKey),
       signedPrekey: bs58.encode(bundle.signedPrekey),
       signedPrekeySig: bs58.encode(bundle.signedPrekeySignature),
-      oneTimePrekeys: bundle.oneTimePrekeys.map((k) => ({ id: k.id, publicKey: bs58.encode(k.publicKey) })),
+      oneTimePrekeys: bundle.oneTimePrekeys.map((k) => ({
+        id: k.id,
+        publicKey: bs58.encode(k.publicKey),
+      })),
     }),
   });
 }
@@ -58,7 +73,12 @@ export default function Auth({ onAuth }) {
       const keys = deriveAllKeys(phrase);
       const pubkey = pubkeyB58(keys.identity);
       const challenge = await fetchChallenge(pubkey);
-      const signature = bs58.encode(nacl.sign.detached(new TextEncoder().encode(challenge), keys.identity.secretKey));
+      const signature = bs58.encode(
+        nacl.sign.detached(
+          new TextEncoder().encode(challenge),
+          keys.identity.secretKey,
+        ),
+      );
       const data = await verifySignature(pubkey, signature);
 
       const signedPre = generateSignedPrekey(keys.identity.secretKey);
@@ -84,11 +104,17 @@ export default function Auth({ onAuth }) {
     setLoading("phantom");
     try {
       const phantom = window?.solana;
-      if (!phantom?.isPhantom) throw new Error("phantom wallet not found — install it from phantom.app");
+      if (!phantom?.isPhantom)
+        throw new Error(
+          "phantom wallet not found — install it from phantom.app",
+        );
       const resp = await phantom.connect();
       const pubkey = resp.publicKey.toString();
       const challenge = await fetchChallenge(pubkey);
-      const { signature } = await phantom.signMessage(new TextEncoder().encode(challenge), "utf8");
+      const { signature } = await phantom.signMessage(
+        new TextEncoder().encode(challenge),
+        "utf8",
+      );
       const data = await verifySignature(pubkey, bs58.encode(signature));
       const ephEncrypt = nacl.box.keyPair();
       onAuth({
@@ -110,11 +136,17 @@ export default function Auth({ onAuth }) {
     setError("");
     setLoading("metamask");
     try {
-      if (!window?.ethereum?.isMetaMask) throw new Error("metamask not found — install it from metamask.io");
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      if (!window?.ethereum?.isMetaMask)
+        throw new Error("metamask not found — install it from metamask.io");
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
       const address = accounts[0];
       const challenge = await fetchChallenge(address);
-      const signature = await window.ethereum.request({ method: "personal_sign", params: [challenge, address] });
+      const signature = await window.ethereum.request({
+        method: "personal_sign",
+        params: [challenge, address],
+      });
       const data = await verifySignature(address, signature);
       const ephEncrypt = nacl.box.keyPair();
       onAuth({
@@ -140,13 +172,22 @@ export default function Auth({ onAuth }) {
           <p className="tagline">your new wallet seed phrase</p>
           <div className="seed-display">
             {generatedPhrase.split(" ").map((word, i) => (
-              <span key={i} className="seed-word"><em>{i + 1}.</em> {word}</span>
+              <span key={i} className="seed-word">
+                <em>{i + 1}.</em> {word}
+              </span>
             ))}
           </div>
-          <p className="warning">write this down. it is your only login. lose it and you lose access forever.</p>
-          <button onClick={() => signInWithSeed(generatedPhrase)}>i saved it — sign in</button>
+          <p className="warning">
+            write this down. it is your only login. lose it and you lose access
+            forever.
+          </p>
+          <button onClick={() => signInWithSeed(generatedPhrase)}>
+            i saved it — sign in
+          </button>
           {error && <p className="error">{error}</p>}
-          <p className="switch" onClick={() => setPhase("start")}>back</p>
+          <p className="switch" onClick={() => setPhase("start")}>
+            back
+          </p>
         </div>
       </div>
     );
@@ -166,11 +207,18 @@ export default function Auth({ onAuth }) {
             onChange={(e) => setMnemonic(e.target.value.toLowerCase())}
           />
           {error && <p className="error">{error}</p>}
-          <button onClick={() => {
-            if (!validateMnemonic(mnemonic.trim())) return setError("invalid seed phrase");
-            signInWithSeed(mnemonic.trim());
-          }}>sign in with seed</button>
-          <p className="switch" onClick={() => setPhase("start")}>back</p>
+          <button
+            onClick={() => {
+              if (!validateMnemonic(mnemonic.trim()))
+                return setError("invalid seed phrase");
+              signInWithSeed(mnemonic.trim());
+            }}
+          >
+            sign in with seed
+          </button>
+          <p className="switch" onClick={() => setPhase("start")}>
+            back
+          </p>
         </div>
       </div>
     );
@@ -183,18 +231,37 @@ export default function Auth({ onAuth }) {
         <p className="tagline">encrypted. anonymous. yours.</p>
         <div className="auth-section">
           <h3 className="section-label">wallet extensions</h3>
-          <button className="btn-wallet btn-phantom" onClick={signInWithPhantom} disabled={!!loading}>
+          <button
+            className="btn-wallet btn-phantom"
+            onClick={signInWithPhantom}
+            disabled={!!loading}
+          >
             {loading === "phantom" ? "connecting..." : "sign in with phantom"}
           </button>
-          <button className="btn-wallet btn-metamask" onClick={signInWithMetaMask} disabled={!!loading}>
+          <button
+            className="btn-wallet btn-metamask"
+            onClick={signInWithMetaMask}
+            disabled={!!loading}
+          >
             {loading === "metamask" ? "connecting..." : "sign in with metamask"}
           </button>
         </div>
-        <div className="auth-divider"><span>or</span></div>
+        <div className="auth-divider">
+          <span>or</span>
+        </div>
         <div className="auth-section">
           <h3 className="section-label">seed phrase</h3>
-          <button onClick={() => { setGeneratedPhrase(generateMnemonic()); setPhase("generated"); }}>create new wallet</button>
-          <button className="btn-secondary" onClick={() => setPhase("restore")}>restore from seed phrase</button>
+          <button
+            onClick={() => {
+              setGeneratedPhrase(generateMnemonic());
+              setPhase("generated");
+            }}
+          >
+            create new wallet
+          </button>
+          <button className="btn-secondary" onClick={() => setPhase("restore")}>
+            restore from seed phrase
+          </button>
         </div>
         {error && <p className="error">{error}</p>}
       </div>

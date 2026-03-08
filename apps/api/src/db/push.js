@@ -46,6 +46,7 @@ await sql`
   )
 `;
 
-const tables = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`;
+const tables =
+  await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`;
 console.log("synced:", tables.map((t) => t.table_name).join(", "));
 await sql.end();

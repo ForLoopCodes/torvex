@@ -230,30 +230,60 @@ app.post("/auth/revoke", (req, res) => {
 });
 
 function authMiddleware(req, res, next) {
-  const payload = verifyToken(req.headers.authorization?.replace("Bearer ", ""));
+  const payload = verifyToken(
+    req.headers.authorization?.replace("Bearer ", ""),
+  );
   if (!payload) return res.status(401).json({ error: "unauthorized" });
   req.pubkey = payload.sub;
   next();
 }
 
 app.post("/keys/bundle", authMiddleware, async (req, res) => {
-  const { identityKey, signedPrekey, signedPrekeySig, oneTimePrekeys: otps } = req.body;
+  const {
+    identityKey,
+    signedPrekey,
+    signedPrekeySig,
+    oneTimePrekeys: otps,
+  } = req.body;
 
   if (!identityKey || !signedPrekey || !signedPrekeySig)
     return res.status(400).json({ error: "missing prekey fields" });
-  if (typeof identityKey !== "string" || typeof signedPrekey !== "string" || typeof signedPrekeySig !== "string")
+  if (
+    typeof identityKey !== "string" ||
+    typeof signedPrekey !== "string" ||
+    typeof signedPrekeySig !== "string"
+  )
     return res.status(400).json({ error: "invalid prekey types" });
-  if (identityKey.length > 128 || signedPrekey.length > 128 || signedPrekeySig.length > 256)
+  if (
+    identityKey.length > 128 ||
+    signedPrekey.length > 128 ||
+    signedPrekeySig.length > 256
+  )
     return res.status(400).json({ error: "prekey too large" });
 
   try {
-    await db.update(users).set({ identityKey, signedPrekey, signedPrekeySig }).where(eq(users.pubkey, req.pubkey));
+    await db
+      .update(users)
+      .set({ identityKey, signedPrekey, signedPrekeySig })
+      .where(eq(users.pubkey, req.pubkey));
 
     if (Array.isArray(otps) && otps.length > 0 && otps.length <= 100) {
       const rows = otps
-        .filter((k) => typeof k.id === "number" && typeof k.publicKey === "string" && k.publicKey.length <= 128)
-        .map((k) => ({ id: `${req.pubkey}:${k.id}`, pubkey: req.pubkey, prekeyIndex: k.id, publicKey: k.publicKey, used: false }));
-      if (rows.length) await db.insert(oneTimePrekeys).values(rows).onConflictDoNothing();
+        .filter(
+          (k) =>
+            typeof k.id === "number" &&
+            typeof k.publicKey === "string" &&
+            k.publicKey.length <= 128,
+        )
+        .map((k) => ({
+          id: `${req.pubkey}:${k.id}`,
+          pubkey: req.pubkey,
+          prekeyIndex: k.id,
+          publicKey: k.publicKey,
+          used: false,
+        }));
+      if (rows.length)
+        await db.insert(oneTimePrekeys).values(rows).onConflictDoNothing();
     }
 
     res.json({ ok: true });
@@ -265,34 +295,90 @@ app.post("/keys/bundle", authMiddleware, async (req, res) => {
 
 app.get("/keys/bundle/:pubkey", authMiddleware, async (req, res) => {
   const target = req.params.pubkey;
-  if (!isValidPubkey(target)) return res.status(400).json({ error: "invalid pubkey" });
+  if (!isValidPubkey(target))
+    return res.status(400).json({ error: "invalid pubkey" });
 
   try {
-    const [user] = await db.select({
-      identityKey: users.identityKey,
-      signedPrekey: users.signedPrekey,
-      signedPrekeySig: users.signedPrekeySig,
-    }).from(users).where(eq(users.pubkey, target)).limit(1);
+    const [user] = await db
+      .select({
+        identityKey: users.identityKey,
+        signedPrekey: users.signedPrekey,
+        signedPrekeySig: users.signedPrekeySig,
+      })
+      .from(users)
+      .where(eq(users.pubkey, target))
+      .limit(1);
 
     if (!user?.identityKey) return res.status(404).json({ error: "no bundle" });
 
-    const [otp] = await db.select({
-      id: oneTimePrekeys.id,
-      prekeyIndex: oneTimePrekeys.prekeyIndex,
-      publicKey: oneTimePrekeys.publicKey,
-    }).from(oneTimePrekeys).where(and(eq(oneTimePrekeys.pubkey, target), eq(oneTimePrekeys.used, false))).limit(1);
+    const [otp] = await db
+      .select({
+        id: oneTimePrekeys.id,
+        prekeyIndex: oneTimePrekeys.prekeyIndex,
+        publicKey: oneTimePrekeys.publicKey,
+      })
+      .from(oneTimePrekeys)
+      .where(
+        and(eq(oneTimePrekeys.pubkey, target), eq(oneTimePrekeys.used, false)),
+      )
+      .limit(1);
 
-    if (otp) await db.update(oneTimePrekeys).set({ used: true }).where(eq(oneTimePrekeys.id, otp.id));
+    if (otp)
+      await db
+        .update(oneTimePrekeys)
+        .set({ used: true })
+        .where(eq(oneTimePrekeys.id, otp.id));
 
     res.json({
       identityKey: user.identityKey,
       signedPrekey: user.signedPrekey,
       signedPrekeySig: user.signedPrekeySig,
-      oneTimePrekey: otp ? { id: otp.prekeyIndex, publicKey: otp.publicKey } : null,
+      oneTimePrekey: otp
+        ? { id: otp.prekeyIndex, publicKey: otp.publicKey }
+        : null,
     });
   } catch (e) {
     console.error(`[${req.id}] bundle fetch:`, e.message);
     res.status(500).json({ error: "bundle fetch failed" });
+  }
+});
+
+app.post("/profile/name", authMiddleware, async (req, res) => {
+  const { displayName } = req.body;
+  if (!displayName || typeof displayName !== "string" || displayName.length > 32)
+    return res.status(400).json({ error: "invalid name (max 32 chars)" });
+  const clean = displayName.replace(/[<>&"']/g, "").trim();
+  if (!clean) return res.status(400).json({ error: "empty name" });
+  try {
+    await db.update(users).set({ displayName: clean }).where(eq(users.pubkey, req.pubkey));
+    res.json({ ok: true, displayName: clean });
+  } catch (e) {
+    console.error(`[${req.id}] set name:`, e.message);
+    res.status(500).json({ error: "update failed" });
+  }
+});
+
+app.get("/profile/:pubkey", authMiddleware, async (req, res) => {
+  if (!isValidPubkey(req.params.pubkey)) return res.status(400).json({ error: "invalid pubkey" });
+  try {
+    const [user] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.pubkey, req.params.pubkey)).limit(1);
+    res.json({ displayName: user?.displayName || null });
+  } catch (e) {
+    console.error(`[${req.id}] get profile:`, e.message);
+    res.status(500).json({ error: "fetch failed" });
+  }
+});
+
+app.get("/messages/pending", authMiddleware, async (req, res) => {
+  try {
+    const pending = await db.select().from(messages).where(and(eq(messages.toPubkey, req.pubkey), eq(messages.delivered, false))).limit(100);
+    if (pending.length) {
+      await db.update(messages).set({ delivered: true }).where(and(eq(messages.toPubkey, req.pubkey), eq(messages.delivered, false)));
+    }
+    res.json({ messages: pending });
+  } catch (e) {
+    console.error(`[${req.id}] pending msgs:`, e.message);
+    res.status(500).json({ error: "fetch failed" });
   }
 });
 
@@ -401,21 +487,43 @@ wss.on("connection", (ws, req) => {
       }
 
       if (msg.type === "x3dh_init") {
-        if (!msg.to || typeof msg.to !== "string" || !isValidPubkey(msg.to)) return;
-        if (!msg.identityKey || !msg.ephemeralKey || typeof msg.header !== "object") return;
+        if (!msg.to || typeof msg.to !== "string" || !isValidPubkey(msg.to))
+          return;
+        if (
+          !msg.identityKey ||
+          !msg.ephemeralKey ||
+          typeof msg.header !== "object"
+        )
+          return;
         const target = sockets.get(msg.to);
         if (target?.readyState === 1) {
-          target.send(JSON.stringify({
-            type: "x3dh_init",
-            from: pubkey,
-            identityKey: msg.identityKey,
-            ephemeralKey: msg.ephemeralKey,
-            usedOnePrekeyId: msg.usedOnePrekeyId ?? null,
-            header: msg.header,
-            nonce: msg.nonce,
-            ciphertext: msg.ciphertext,
-          }));
+          target.send(
+            JSON.stringify({
+              type: "x3dh_init",
+              from: pubkey,
+              identityKey: msg.identityKey,
+              ephemeralKey: msg.ephemeralKey,
+              usedOnePrekeyId: msg.usedOnePrekeyId ?? null,
+              header: msg.header,
+              nonce: msg.nonce,
+              ciphertext: msg.ciphertext,
+            }),
+          );
         }
+        return;
+      }
+
+      if (msg.type === "typing") {
+        if (!msg.to || typeof msg.to !== "string") return;
+        const target = sockets.get(msg.to);
+        if (target?.readyState === 1) target.send(JSON.stringify({ type: "typing", from: pubkey, active: !!msg.active }));
+        return;
+      }
+
+      if (msg.type === "read") {
+        if (!msg.to || typeof msg.to !== "string" || !msg.msgId) return;
+        const target = sockets.get(msg.to);
+        if (target?.readyState === 1) target.send(JSON.stringify({ type: "read", from: pubkey, msgId: msg.msgId }));
         return;
       }
 
@@ -440,7 +548,8 @@ wss.on("connection", (ws, req) => {
       for (const r of msg.recipients) {
         if (!r.to || typeof r.to !== "string") continue;
         if (!r.nonce || !r.ciphertext) continue;
-        if (typeof r.nonce !== "string" || typeof r.ciphertext !== "string") continue;
+        if (typeof r.nonce !== "string" || typeof r.ciphertext !== "string")
+          continue;
         if (r.nonce.length > 128 || r.ciphertext.length > 16384) continue;
 
         const payload = {
@@ -455,6 +564,16 @@ wss.on("connection", (ws, req) => {
 
         if (sockets.has(r.to) && sockets.get(r.to).readyState === 1) {
           sockets.get(r.to).send(JSON.stringify(payload));
+        } else {
+          try {
+            await db.insert(messages).values({
+              id: `${msgId}:${r.to}`,
+              fromPubkey: pubkey,
+              toPubkey: r.to,
+              ciphertext: JSON.stringify({ nonce: r.nonce, ciphertext: r.ciphertext, header: r.header || null }),
+              delivered: false,
+            });
+          } catch {}
         }
       }
 
