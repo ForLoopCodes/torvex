@@ -556,8 +556,13 @@ button:hover {
 }
 
 @keyframes typingPulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .chat-input input:disabled {

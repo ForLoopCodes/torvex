@@ -1,30 +1,39 @@
 // torvex crypto - bip44 hd key derivation
-// slip-0010 ed25519 paths for signing and encryption
+// pure browser slip-0010 ed25519 via noble hashes
 
 import * as bip39 from "bip39";
-import { derivePath } from "ed25519-hd-key";
+import { hmac } from "@noble/hashes/hmac";
+import { sha512 } from "@noble/hashes/sha512";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 
+const HARDENED = 0x80000000;
 const PATHS = {
-  solana: "m/44'/501'/0'/0'",
-  torvexSign: "m/44'/888'/0'/0'",
-  torvexEncrypt: "m/44'/888'/1'/0'",
-  torvexPrekey: "m/44'/888'/2'/0'",
+  torvexSign: [44, 888, 0, 0],
+  torvexEncrypt: [44, 888, 1, 0],
+  torvexPrekey: [44, 888, 2, 0],
 };
+
+function slip0010Derive(seed, path) {
+  let I = hmac(sha512, new TextEncoder().encode("ed25519 seed"), seed);
+  let key = I.slice(0, 32), chain = I.slice(32);
+  for (const idx of path) {
+    const data = new Uint8Array(37);
+    data.set(key, 1);
+    new DataView(data.buffer).setUint32(33, (idx | HARDENED) >>> 0);
+    I = hmac(sha512, chain, data);
+    key = I.slice(0, 32);
+    chain = I.slice(32);
+  }
+  return key;
+}
 
 export function deriveAllKeys(mnemonic) {
   const seed = bip39.mnemonicToSeedSync(mnemonic);
-  const seedHex = seed.toString("hex");
-
-  const signSeed = derivePath(PATHS.torvexSign, seedHex).key;
-  const encSeed = derivePath(PATHS.torvexEncrypt, seedHex).key;
-  const prekeySeed = derivePath(PATHS.torvexPrekey, seedHex).key;
-
   return {
-    identity: nacl.sign.keyPair.fromSeed(new Uint8Array(signSeed)),
-    encryption: nacl.box.keyPair.fromSecretKey(new Uint8Array(encSeed)),
-    prekey: nacl.box.keyPair.fromSecretKey(new Uint8Array(prekeySeed)),
+    identity: nacl.sign.keyPair.fromSeed(slip0010Derive(seed, PATHS.torvexSign)),
+    encryption: nacl.box.keyPair.fromSecretKey(slip0010Derive(seed, PATHS.torvexEncrypt)),
+    prekey: nacl.box.keyPair.fromSecretKey(slip0010Derive(seed, PATHS.torvexPrekey)),
   };
 }
 

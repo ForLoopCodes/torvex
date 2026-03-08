@@ -345,12 +345,19 @@ app.get("/keys/bundle/:pubkey", authMiddleware, async (req, res) => {
 
 app.post("/profile/name", authMiddleware, async (req, res) => {
   const { displayName } = req.body;
-  if (!displayName || typeof displayName !== "string" || displayName.length > 32)
+  if (
+    !displayName ||
+    typeof displayName !== "string" ||
+    displayName.length > 32
+  )
     return res.status(400).json({ error: "invalid name (max 32 chars)" });
   const clean = displayName.replace(/[<>&"']/g, "").trim();
   if (!clean) return res.status(400).json({ error: "empty name" });
   try {
-    await db.update(users).set({ displayName: clean }).where(eq(users.pubkey, req.pubkey));
+    await db
+      .update(users)
+      .set({ displayName: clean })
+      .where(eq(users.pubkey, req.pubkey));
     res.json({ ok: true, displayName: clean });
   } catch (e) {
     console.error(`[${req.id}] set name:`, e.message);
@@ -359,9 +366,14 @@ app.post("/profile/name", authMiddleware, async (req, res) => {
 });
 
 app.get("/profile/:pubkey", authMiddleware, async (req, res) => {
-  if (!isValidPubkey(req.params.pubkey)) return res.status(400).json({ error: "invalid pubkey" });
+  if (!isValidPubkey(req.params.pubkey))
+    return res.status(400).json({ error: "invalid pubkey" });
   try {
-    const [user] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.pubkey, req.params.pubkey)).limit(1);
+    const [user] = await db
+      .select({ displayName: users.displayName })
+      .from(users)
+      .where(eq(users.pubkey, req.params.pubkey))
+      .limit(1);
     res.json({ displayName: user?.displayName || null });
   } catch (e) {
     console.error(`[${req.id}] get profile:`, e.message);
@@ -371,9 +383,20 @@ app.get("/profile/:pubkey", authMiddleware, async (req, res) => {
 
 app.get("/messages/pending", authMiddleware, async (req, res) => {
   try {
-    const pending = await db.select().from(messages).where(and(eq(messages.toPubkey, req.pubkey), eq(messages.delivered, false))).limit(100);
+    const pending = await db
+      .select()
+      .from(messages)
+      .where(
+        and(eq(messages.toPubkey, req.pubkey), eq(messages.delivered, false)),
+      )
+      .limit(100);
     if (pending.length) {
-      await db.update(messages).set({ delivered: true }).where(and(eq(messages.toPubkey, req.pubkey), eq(messages.delivered, false)));
+      await db
+        .update(messages)
+        .set({ delivered: true })
+        .where(
+          and(eq(messages.toPubkey, req.pubkey), eq(messages.delivered, false)),
+        );
     }
     res.json({ messages: pending });
   } catch (e) {
@@ -516,14 +539,24 @@ wss.on("connection", (ws, req) => {
       if (msg.type === "typing") {
         if (!msg.to || typeof msg.to !== "string") return;
         const target = sockets.get(msg.to);
-        if (target?.readyState === 1) target.send(JSON.stringify({ type: "typing", from: pubkey, active: !!msg.active }));
+        if (target?.readyState === 1)
+          target.send(
+            JSON.stringify({
+              type: "typing",
+              from: pubkey,
+              active: !!msg.active,
+            }),
+          );
         return;
       }
 
       if (msg.type === "read") {
         if (!msg.to || typeof msg.to !== "string" || !msg.msgId) return;
         const target = sockets.get(msg.to);
-        if (target?.readyState === 1) target.send(JSON.stringify({ type: "read", from: pubkey, msgId: msg.msgId }));
+        if (target?.readyState === 1)
+          target.send(
+            JSON.stringify({ type: "read", from: pubkey, msgId: msg.msgId }),
+          );
         return;
       }
 
@@ -570,7 +603,11 @@ wss.on("connection", (ws, req) => {
               id: `${msgId}:${r.to}`,
               fromPubkey: pubkey,
               toPubkey: r.to,
-              ciphertext: JSON.stringify({ nonce: r.nonce, ciphertext: r.ciphertext, header: r.header || null }),
+              ciphertext: JSON.stringify({
+                nonce: r.nonce,
+                ciphertext: r.ciphertext,
+                header: r.header || null,
+              }),
               delivered: false,
             });
           } catch {}

@@ -11,18 +11,18 @@ torvex is a zero-knowledge encrypted chat with signal double ratchet, x3dh key a
 - **apps/web**: react + vite frontend (port 6767)
 - **database**: supabase postgresql via drizzle orm (ssl enforced)
 
-## current phase: 1.5+ (signal protocol + bip44)
+## current phase: 2.0 (signal protocol + full features)
 
 ### cryptographic stack
 
-| protocol | implementation | purpose |
-|---|---|---|
-| bip44/slip-0010 | `crypto/keys.js` | hd key derivation — `m/44'/888'/N'/0'` paths for sign, encrypt, prekey |
-| x3dh | `crypto/x3dh.js` | initial session key agreement with prekey bundles |
-| double ratchet | `crypto/ratchet.js` | forward secrecy — per-message kdf chains + dh ratchet steps |
-| nacl.secretbox | ratchet message encryption | xsalsa20-poly1305 symmetric encryption with ratchet-derived keys |
-| nacl.box | x3dh dh operations | curve25519 diffie-hellman for shared secret derivation |
-| hkdf-sha256 | `@noble/hashes` | kdf for root chain, message chain, x3dh shared secret |
+| protocol        | implementation             | purpose                                                                |
+| --------------- | -------------------------- | ---------------------------------------------------------------------- |
+| bip44/slip-0010 | `crypto/keys.js`           | pure browser hd derivation via @noble/hashes hmac-sha512, no node deps |
+| x3dh            | `crypto/x3dh.js`           | initial session key agreement with prekey bundles                      |
+| double ratchet  | `crypto/ratchet.js`        | forward secrecy — per-message kdf chains + dh ratchet steps            |
+| nacl.secretbox  | ratchet message encryption | xsalsa20-poly1305 symmetric encryption with ratchet-derived keys       |
+| nacl.box        | x3dh dh operations         | curve25519 diffie-hellman for shared secret derivation                 |
+| hkdf-sha256     | `@noble/hashes`            | kdf for root chain, message chain, x3dh shared secret                  |
 
 ### auth flow
 
@@ -69,7 +69,7 @@ torvex/
 │   │           └── push.js      (manual schema push — drizzle-kit node v24 workaround)
 │   └── web/
 │       ├── .env                 (VITE_API_URL, VITE_WS_URL)
-│       ├── vite.config.js       (buffer polyfill, proxy /auth + /keys)
+│       ├── vite.config.js       (buffer polyfill, proxy /auth /keys /profile /messages)
 │       ├── index.html
 │       ├── package.json
 │       └── src/
@@ -88,15 +88,15 @@ torvex/
 
 ## security features
 
-| layer | protection |
-|---|---|
-| auth | jwt hs256 + jti + revocation, 30s one-time challenges, csprng nonces |
-| http | helmet (csp, hsts, xss, clickjack), cors lockdown, 8kb body limit, rate limiting |
-| websocket | 10 msg/sec rate limit, 32kb max payload, 5 conn/ip, encpub validation |
-| encryption | signal double ratchet — per-message forward secrecy, x3dh session init |
-| key derivation | bip44/slip-0010 — deterministic hd paths from 24-word mnemonic |
-| database | ssl enforced, only `[e2e:N]` stored, connection pooling (max 10) |
-| operational | graceful shutdown, request id tracing, no error detail leakage |
+| layer          | protection                                                                       |
+| -------------- | -------------------------------------------------------------------------------- |
+| auth           | jwt hs256 + jti + revocation, 30s one-time challenges, csprng nonces             |
+| http           | helmet (csp, hsts, xss, clickjack), cors lockdown, 8kb body limit, rate limiting |
+| websocket      | 10 msg/sec rate limit, 32kb max payload, 5 conn/ip, encpub validation            |
+| encryption     | signal double ratchet — per-message forward secrecy, x3dh session init           |
+| key derivation | bip44/slip-0010 — deterministic hd paths from 24-word mnemonic                   |
+| database       | ssl enforced, only `[e2e:N]` stored, connection pooling (max 10)                 |
+| operational    | graceful shutdown, request id tracing, no error detail leakage                   |
 
 ## api endpoints
 
@@ -125,12 +125,15 @@ torvex/
 ## db schema
 
 ### users
+
 - `pubkey` (pk), `display_name`, `identity_key`, `signed_prekey`, `signed_prekey_sig`, `created_at`
 
 ### one_time_prekeys
+
 - `id` (pk), `pubkey` (fk→users), `prekey_index`, `public_key`, `used`, `created_at`
 
 ### messages
+
 - `id` (pk), `from_pubkey` (fk→users), `to_pubkey` (fk→users), `ciphertext`, `delivered`, `created_at`
 
 ## key conventions
@@ -145,6 +148,7 @@ torvex/
 ## env vars
 
 ### apps/api/.env
+
 - `PORT` — server port (default 4400)
 - `DATABASE_URL` — supabase postgres connection string
 - `JWT_SECRET` — 64+ char hex secret for jwt signing
@@ -152,6 +156,7 @@ torvex/
 - `NODE_ENV` — set to `production` for hsts + trust proxy
 
 ### apps/web/.env
+
 - `VITE_API_URL` — backend http url
 - `VITE_WS_URL` — backend websocket url
 

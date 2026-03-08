@@ -6,11 +6,6 @@ export default defineConfig({
   define: {
     global: "globalThis",
   },
-  resolve: {
-    alias: {
-      stream: "stream-browserify",
-    },
-  },
   server: {
     port: 6767,
     proxy: {
