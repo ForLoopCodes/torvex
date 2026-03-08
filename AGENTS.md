@@ -14,6 +14,7 @@ torchat is an encrypted anonymous chat app using wallet-based authentication (BI
 ## current phase: 1.5 (wallet auth complete)
 
 ### what's built
+
 - bip39 24-word seed phrase wallet generation in browser
 - ed25519 challenge-response auth (no passwords)
 - websocket chat relay with pubkey identity
@@ -21,6 +22,7 @@ torchat is an encrypted anonymous chat app using wallet-based authentication (BI
 - dark theme chat ui
 
 ### auth flow
+
 1. frontend generates/restores 24-word bip39 mnemonic
 2. derives ed25519 keypair from seed (first 32 bytes)
 3. sends pubkey to `POST /auth/challenge`
@@ -31,6 +33,7 @@ torchat is an encrypted anonymous chat app using wallet-based authentication (BI
 8. frontend connects websocket with `?token=xxx`
 
 ## file structure
+
 ```
 torchat/
 ├── plan.md                      (full 5-phase roadmap, DO NOT EDIT)
@@ -59,6 +62,7 @@ torchat/
 ```
 
 ## key conventions
+
 - all file comments: exactly 2 lines at top, 10 words each
 - no redundant variables — chain calls when possible
 - functions <20 lines used once = inline them
@@ -67,16 +71,19 @@ torchat/
 - identity = base58-encoded ed25519 public key (no usernames)
 
 ## next phases (from plan.md)
+
 - **phase 2**: react native android port + qr code scanning
 - **phase 3**: rewrite backend in rust + cassandra
 - **phase 4**: tor hidden service routing (paid tier)
 - **phase 5**: native swift ios + post-quantum crypto (ml-kem)
 
 ## api keys needed
+
 - **supabase**: project url + anon key from https://supabase.com/dashboard
 - set `DATABASE_URL` in `apps/api/.env` to your supabase postgres connection string
 
 ## running the project
+
 ```bash
 npm install          # install all workspace deps
 cd apps/api && node src/server.js   # start backend on :4400

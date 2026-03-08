@@ -33,10 +33,12 @@ app.post("/auth/challenge", (req, res) => {
 
 app.post("/auth/verify", async (req, res) => {
   const { pubkey, signature } = req.body;
-  if (!pubkey || !signature) return res.status(400).json({ error: "missing fields" });
+  if (!pubkey || !signature)
+    return res.status(400).json({ error: "missing fields" });
 
   const challenge = challenges.get(pubkey);
-  if (!challenge) return res.status(401).json({ error: "no pending challenge" });
+  if (!challenge)
+    return res.status(401).json({ error: "no pending challenge" });
 
   try {
     const sigBytes = bs58.decode(signature);

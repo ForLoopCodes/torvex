@@ -11,7 +11,9 @@ export const users = pgTable("users", {
 
 export const messages = pgTable("messages", {
   id: text("id").primaryKey(),
-  fromPubkey: text("from_pubkey").notNull().references(() => users.pubkey),
+  fromPubkey: text("from_pubkey")
+    .notNull()
+    .references(() => users.pubkey),
   toPubkey: text("to_pubkey").references(() => users.pubkey),
   ciphertext: text("ciphertext").notNull(),
   delivered: boolean("delivered").default(false),

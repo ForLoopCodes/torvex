@@ -37,7 +37,9 @@ export default function Auth({ onAuth }) {
       if (!challenge) throw new Error("failed to get challenge");
 
       const msgBytes = new TextEncoder().encode(challenge);
-      const signature = bs58.encode(nacl.sign.detached(msgBytes, keypair.secretKey));
+      const signature = bs58.encode(
+        nacl.sign.detached(msgBytes, keypair.secretKey),
+      );
 
       const verifyRes = await fetch(`${API}/auth/verify`, {
         method: "POST",
@@ -72,10 +74,17 @@ export default function Auth({ onAuth }) {
               </span>
             ))}
           </div>
-          <p className="warning">write this down. it is your only login. lose it and you lose access forever.</p>
-          <button onClick={() => signIn(generatedPhrase)}>i saved it — sign in</button>
+          <p className="warning">
+            write this down. it is your only login. lose it and you lose access
+            forever.
+          </p>
+          <button onClick={() => signIn(generatedPhrase)}>
+            i saved it — sign in
+          </button>
           {error && <p className="error">{error}</p>}
-          <p className="switch" onClick={() => setPhase("start")}>back</p>
+          <p className="switch" onClick={() => setPhase("start")}>
+            back
+          </p>
         </div>
       </div>
     );
@@ -106,7 +115,9 @@ export default function Auth({ onAuth }) {
           >
             sign in with seed
           </button>
-          <p className="switch" onClick={() => setPhase("start")}>back</p>
+          <p className="switch" onClick={() => setPhase("start")}>
+            back
+          </p>
         </div>
       </div>
     );

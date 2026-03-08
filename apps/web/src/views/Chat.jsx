@@ -51,16 +51,24 @@ export default function Chat({ session, onLogout }) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <h2>torchat</h2>
-          <span className="user-badge" title={session.pubkey}>{shortKey(session.pubkey)}</span>
+          <span className="user-badge" title={session.pubkey}>
+            {shortKey(session.pubkey)}
+          </span>
         </div>
         <div className="online-list">
           <h3>online</h3>
-          {onlineUsers.length === 0 && <p className="muted">no one else here yet</p>}
+          {onlineUsers.length === 0 && (
+            <p className="muted">no one else here yet</p>
+          )}
           {onlineUsers.map((u) => (
-            <div key={u} className="online-user" title={u}>{shortKey(u)}</div>
+            <div key={u} className="online-user" title={u}>
+              {shortKey(u)}
+            </div>
           ))}
         </div>
-        <button className="logout-btn" onClick={onLogout}>logout</button>
+        <button className="logout-btn" onClick={onLogout}>
+          logout
+        </button>
       </aside>
 
       <main className="chat-main">
@@ -77,7 +85,9 @@ export default function Chat({ session, onLogout }) {
             >
               <span className="msg-author">{shortKey(m.from)}</span>
               <span className="msg-text">{m.text}</span>
-              <span className="msg-time">{new Date(m.ts).toLocaleTimeString()}</span>
+              <span className="msg-time">
+                {new Date(m.ts).toLocaleTimeString()}
+              </span>
             </div>
           ))}
           <div ref={bottomRef} />
