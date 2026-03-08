@@ -45,7 +45,8 @@ export default function AuthScreen({ onAuth }) {
   }
 
   async function unlockVault() {
-    if (!pin || pin.length < 4) return setError("pin must be at least 4 digits");
+    if (!pin || pin.length < 4)
+      return setError("pin must be at least 4 digits");
     try {
       const phrase = decryptVault(pin);
       if (!phrase) return setError("no saved wallet found");
@@ -56,18 +57,22 @@ export default function AuthScreen({ onAuth }) {
   }
 
   function handleClearVault() {
-    Alert.alert("clear wallet?", "this will remove your saved keys from this device.", [
-      { text: "cancel", style: "cancel" },
-      {
-        text: "clear",
-        style: "destructive",
-        onPress: () => {
-          clearVault();
-          setVaultExists(false);
-          setPhase("start");
+    Alert.alert(
+      "clear wallet?",
+      "this will remove your saved keys from this device.",
+      [
+        { text: "cancel", style: "cancel" },
+        {
+          text: "clear",
+          style: "destructive",
+          onPress: () => {
+            clearVault();
+            setVaultExists(false);
+            setPhase("start");
+          },
         },
-      },
-    ]);
+      ],
+    );
   }
 
   if (vaultExists && phase === "start") {
@@ -127,7 +132,8 @@ export default function AuthScreen({ onAuth }) {
         <TouchableOpacity
           style={s.btn}
           onPress={() => {
-            if (pin.length < 4) return setError("pin must be at least 4 digits");
+            if (pin.length < 4)
+              return setError("pin must be at least 4 digits");
             doAuth(generatedPhrase, pin);
           }}
         >
@@ -172,7 +178,8 @@ export default function AuthScreen({ onAuth }) {
           onPress={() => {
             if (!validateMnemonic(mnemonic.trim()))
               return setError("invalid seed phrase");
-            if (pin.length < 4) return setError("pin must be at least 4 digits");
+            if (pin.length < 4)
+              return setError("pin must be at least 4 digits");
             doAuth(mnemonic.trim(), pin);
           }}
         >
@@ -252,10 +259,19 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  btnSecondary: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#1e1e2e" },
+  btnSecondary: {
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "#1e1e2e",
+  },
   btnSecondaryText: { color: "#e4e4ef" },
   link: { color: "#7c5cfc", fontSize: 14, marginTop: 8 },
-  error: { color: "#e05555", fontSize: 13, marginBottom: 12, textAlign: "center" },
+  error: {
+    color: "#e05555",
+    fontSize: 13,
+    marginBottom: 12,
+    textAlign: "center",
+  },
   warning: {
     color: "#e05555",
     fontSize: 12,

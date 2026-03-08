@@ -28,7 +28,10 @@ export default function ScanScreen({ onScan, onClose }) {
       if (/^[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(pk)) {
         onScan(pk);
       } else {
-        Alert.alert("invalid qr", "this qr code does not contain a valid pubkey");
+        Alert.alert(
+          "invalid qr",
+          "this qr code does not contain a valid pubkey",
+        );
       }
     },
   });

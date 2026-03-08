@@ -30,7 +30,10 @@ export async function authenticate(mnemonic) {
   if (!challenge) throw new Error("failed to get challenge");
 
   const signature = bs58.encode(
-    nacl.sign.detached(new TextEncoder().encode(challenge), keys.identity.secretKey),
+    nacl.sign.detached(
+      new TextEncoder().encode(challenge),
+      keys.identity.secretKey,
+    ),
   );
 
   const verifyRes = await fetch(`${API}/auth/verify`, {

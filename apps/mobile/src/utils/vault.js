@@ -53,10 +53,9 @@ export function decryptVault(pin) {
     Buffer.from(bs58.decode(iv)),
   );
   decipher.setAuthTag(tag);
-  return Buffer.concat([
-    decipher.update(encrypted),
-    decipher.final(),
-  ]).toString("utf8");
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(
+    "utf8",
+  );
 }
 
 export function hasVault() {

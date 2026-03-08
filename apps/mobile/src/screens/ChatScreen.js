@@ -58,13 +58,18 @@ function loadRatchetState(myPk, peerPk) {
 
 function saveRatchetState(myPk, peerPk, state) {
   try {
-    storage.setItem(`${RATCHET_PREFIX}${myPk}:${peerPk}`, serializeState(state));
+    storage.setItem(
+      `${RATCHET_PREFIX}${myPk}:${peerPk}`,
+      serializeState(state),
+    );
   } catch {}
 }
 
 function loadHistory(myPk, peerPk) {
   try {
-    return JSON.parse(storage.getItem(`${HISTORY_PREFIX}${myPk}:${peerPk}`) || "[]");
+    return JSON.parse(
+      storage.getItem(`${HISTORY_PREFIX}${myPk}:${peerPk}`) || "[]",
+    );
   } catch {
     return [];
   }
@@ -91,7 +96,9 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
   const [showSidebar, setShowSidebar] = useState(true);
   const [contacts, setContacts] = useState(() => {
     try {
-      return JSON.parse(storage.getItem(`torvex_contacts_${session.pubkey}`) || "[]");
+      return JSON.parse(
+        storage.getItem(`torvex_contacts_${session.pubkey}`) || "[]",
+      );
     } catch {
       return [];
     }
@@ -113,11 +120,18 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
   }, [activePeer]);
 
   useEffect(() => {
-    storage.setItem(`torvex_contacts_${session.pubkey}`, JSON.stringify(contacts));
+    storage.setItem(
+      `torvex_contacts_${session.pubkey}`,
+      JSON.stringify(contacts),
+    );
   }, [contacts, session.pubkey]);
 
   useEffect(() => {
-    if (scannedPk && scannedPk !== session.pubkey && !contacts.includes(scannedPk)) {
+    if (
+      scannedPk &&
+      scannedPk !== session.pubkey &&
+      !contacts.includes(scannedPk)
+    ) {
       setContacts((prev) => [...prev, scannedPk]);
       selectPeer(scannedPk);
     }
@@ -136,7 +150,8 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
 
   const getRatchet = useCallback(
     (peerPk) => {
-      if (ratchetsRef.current.has(peerPk)) return ratchetsRef.current.get(peerPk);
+      if (ratchetsRef.current.has(peerPk))
+        return ratchetsRef.current.get(peerPk);
       const loaded = loadRatchetState(session.pubkey, peerPk);
       if (loaded) {
         ratchetsRef.current.set(peerPk, loaded);
@@ -171,7 +186,11 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
 
   const initSessionWithPeer = useCallback(
     async (peerPk) => {
-      if (!hasRatchetKeys || initializingRef.current.has(peerPk) || getRatchet(peerPk))
+      if (
+        !hasRatchetKeys ||
+        initializingRef.current.has(peerPk) ||
+        getRatchet(peerPk)
+      )
         return;
       initializingRef.current.add(peerPk);
       try {
@@ -236,7 +255,12 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
         if (!data.header || !data.nonce || !data.ciphertext) continue;
         const state = getRatchet(pm.fromPubkey);
         if (!state) continue;
-        const text = ratchetDecrypt(state, data.header, data.nonce, data.ciphertext);
+        const text = ratchetDecrypt(
+          state,
+          data.header,
+          data.nonce,
+          data.ciphertext,
+        );
         setRatchet(pm.fromPubkey, state);
         addMsg(pm.fromPubkey, {
           id: pm.id,
@@ -245,7 +269,10 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
           ts: new Date(pm.createdAt).getTime(),
         });
         if (activePeerRef.current !== pm.fromPubkey)
-          setUnread((prev) => ({ ...prev, [pm.fromPubkey]: (prev[pm.fromPubkey] || 0) + 1 }));
+          setUnread((prev) => ({
+            ...prev,
+            [pm.fromPubkey]: (prev[pm.fromPubkey] || 0) + 1,
+          }));
       } catch {}
     }
   }, [session.token, hasRatchetKeys, getRatchet, setRatchet, addMsg]);
@@ -265,7 +292,9 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
           const theirEphemeral = bs58.decode(msg.ephemeralKey);
           const myOtp =
             msg.usedOnePrekeyId != null
-              ? session.oneTimePrekeys?.find((k) => k.id === msg.usedOnePrekeyId)?.keyPair
+              ? session.oneTimePrekeys?.find(
+                  (k) => k.id === msg.usedOnePrekeyId,
+                )?.keyPair
               : null;
           const sharedSecret = x3dhResponder(
             session.keys.identity,
@@ -274,11 +303,15 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
             theirIdentity,
             theirEphemeral,
           );
-          const state = initReceiver(sharedSecret, session.signedPrekey?.keyPair);
+          const state = initReceiver(
+            sharedSecret,
+            session.signedPrekey?.keyPair,
+          );
           ratchetDecrypt(state, msg.header, msg.nonce, msg.ciphertext);
           setRatchet(msg.from, state);
           resolveDisplayName(msg.from);
-          if (!contacts.includes(msg.from)) setContacts((prev) => [...prev, msg.from]);
+          if (!contacts.includes(msg.from))
+            setContacts((prev) => [...prev, msg.from]);
           addMsg(msg.from, {
             id: Date.now().toString(),
             from: "system",
@@ -292,7 +325,12 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
           const state = getRatchet(msg.from);
           if (state) {
             try {
-              text = ratchetDecrypt(state, msg.header, msg.nonce, msg.ciphertext);
+              text = ratchetDecrypt(
+                state,
+                msg.header,
+                msg.nonce,
+                msg.ciphertext,
+              );
               setRatchet(msg.from, state);
             } catch {
               text = "[ratchet decryption failed]";
@@ -301,7 +339,10 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
         }
         addMsg(msg.from, { id: msg.id, from: msg.from, text, ts: msg.ts });
         if (activePeerRef.current !== msg.from)
-          setUnread((prev) => ({ ...prev, [msg.from]: (prev[msg.from] || 0) + 1 }));
+          setUnread((prev) => ({
+            ...prev,
+            [msg.from]: (prev[msg.from] || 0) + 1,
+          }));
       } else if (msg.type === "chat_ack") {
         const pending = pendingRef.current.get(msg.id);
         if (pending) {
@@ -315,14 +356,24 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
         }
       }
     },
-    [session, hasRatchetKeys, getRatchet, setRatchet, resolveDisplayName, addMsg, contacts],
+    [
+      session,
+      hasRatchetKeys,
+      getRatchet,
+      setRatchet,
+      resolveDisplayName,
+      addMsg,
+      contacts,
+    ],
   );
 
   const connectWs = useCallback(() => {
     const encPub = session.keys?.encryption
       ? bs58.encode(session.keys.encryption.publicKey)
       : "";
-    const ws = new WebSocket(`${WS_URL}?token=${session.token}&encPub=${encPub}`);
+    const ws = new WebSocket(
+      `${WS_URL}?token=${session.token}&encPub=${encPub}`,
+    );
     wsRef.current = ws;
     setWsStatus("connecting");
 
@@ -338,7 +389,10 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
     ws.onclose = (ev) => {
       setWsStatus("disconnected");
       if (ev.code === 4001 || ev.code === 4002) return;
-      const delay = Math.min(RECONNECT_BASE * 2 ** reconnectRef.current, RECONNECT_MAX);
+      const delay = Math.min(
+        RECONNECT_BASE * 2 ** reconnectRef.current,
+        RECONNECT_MAX,
+      );
       reconnectRef.current++;
       reconnectTimerRef.current = setTimeout(connectWs, delay);
     };
@@ -361,7 +415,8 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
       const hist = loadHistory(session.pubkey, pk);
       if (hist.length) loaded[pk] = hist;
     });
-    if (Object.keys(loaded).length) setMessages((prev) => ({ ...loaded, ...prev }));
+    if (Object.keys(loaded).length)
+      setMessages((prev) => ({ ...loaded, ...prev }));
   }, [session.pubkey, contacts]);
 
   function send() {
@@ -392,7 +447,12 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
       if (pendingRef.current.has(tempId)) {
         const p = pendingRef.current.get(tempId);
         pendingRef.current.delete(tempId);
-        addMsg(p.peer, { id: tempId, from: session.pubkey, text: p.text, ts: Date.now() });
+        addMsg(p.peer, {
+          id: tempId,
+          from: session.pubkey,
+          text: p.text,
+          ts: Date.now(),
+        });
       }
     }, 3000);
     setInput("");
@@ -423,7 +483,11 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
     <View
       style={[
         s.msgBubble,
-        m.from === session.pubkey ? s.msgSelf : m.from === "system" ? s.msgSystem : s.msgOther,
+        m.from === session.pubkey
+          ? s.msgSelf
+          : m.from === "system"
+          ? s.msgSystem
+          : s.msgOther,
       ]}
     >
       {m.from !== "system" && (
@@ -431,7 +495,9 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
           {m.from === session.pubkey ? "you" : peerLabel(m.from)}
         </Text>
       )}
-      <Text style={m.from === "system" ? s.msgSystemText : s.msgText}>{m.text}</Text>
+      <Text style={m.from === "system" ? s.msgSystemText : s.msgText}>
+        {m.text}
+      </Text>
       <Text style={s.msgTime}>{new Date(m.ts).toLocaleTimeString()}</Text>
     </View>
   );
@@ -442,7 +508,9 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
         <View style={s.header}>
           <Text style={s.headerTitle}>torvex</Text>
           <View style={s.statusRow}>
-            <View style={[s.dot, wsStatus === "connected" ? s.dotOk : s.dotErr]} />
+            <View
+              style={[s.dot, wsStatus === "connected" ? s.dotOk : s.dotErr]}
+            />
             <Text style={s.statusText}>{wsStatus}</Text>
           </View>
         </View>
@@ -502,7 +570,12 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
         <Text style={s.chatHeaderTitle} numberOfLines={1}>
           {peerLabel(activePeer)}
         </Text>
-        <Text style={[s.statusText, onlineUsers.includes(activePeer) ? s.onlineText : {}]}>
+        <Text
+          style={[
+            s.statusText,
+            onlineUsers.includes(activePeer) ? s.onlineText : {},
+          ]}
+        >
           {onlineUsers.includes(activePeer) ? "online" : "offline"}
         </Text>
       </View>
@@ -511,7 +584,9 @@ export default function ChatScreen({ session, scannedPk, onScan, onLogout }) {
         data={peerMsgs}
         keyExtractor={(m) => m.id}
         renderItem={renderMsg}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={() =>
+          flatListRef.current?.scrollToEnd({ animated: true })
+        }
         contentContainerStyle={s.msgList}
         ListEmptyComponent={<Text style={s.muted}>no messages yet</Text>}
       />
@@ -548,8 +623,18 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#1e1e2e",
   },
-  headerTitle: { fontSize: 24, fontWeight: "800", color: "#7c5cfc", letterSpacing: 2 },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#7c5cfc",
+    letterSpacing: 2,
+  },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
   dot: { width: 8, height: 8, borderRadius: 4 },
   dotOk: { backgroundColor: "#4ade80" },
   dotErr: { backgroundColor: "#e05555" },
@@ -616,7 +701,12 @@ const s = StyleSheet.create({
     gap: 12,
   },
   backBtn: { color: "#7c5cfc", fontSize: 24, fontWeight: "700" },
-  chatHeaderTitle: { color: "#e4e4ef", fontSize: 18, fontWeight: "700", flex: 1 },
+  chatHeaderTitle: {
+    color: "#e4e4ef",
+    fontSize: 18,
+    fontWeight: "700",
+    flex: 1,
+  },
   msgList: { padding: 12, paddingBottom: 8 },
   msgBubble: {
     maxWidth: "80%",
@@ -624,12 +714,30 @@ const s = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 8,
   },
-  msgSelf: { backgroundColor: "#1a1a2e", alignSelf: "flex-end", borderBottomRightRadius: 4 },
-  msgOther: { backgroundColor: "#161622", alignSelf: "flex-start", borderBottomLeftRadius: 4 },
+  msgSelf: {
+    backgroundColor: "#1a1a2e",
+    alignSelf: "flex-end",
+    borderBottomRightRadius: 4,
+  },
+  msgOther: {
+    backgroundColor: "#161622",
+    alignSelf: "flex-start",
+    borderBottomLeftRadius: 4,
+  },
   msgSystem: { alignSelf: "center", backgroundColor: "transparent" },
-  msgAuthor: { color: "#7c5cfc", fontSize: 11, fontWeight: "600", marginBottom: 2 },
+  msgAuthor: {
+    color: "#7c5cfc",
+    fontSize: 11,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
   msgText: { color: "#e4e4ef", fontSize: 15 },
-  msgSystemText: { color: "#6b6b80", fontSize: 12, fontStyle: "italic", textAlign: "center" },
+  msgSystemText: {
+    color: "#6b6b80",
+    fontSize: 12,
+    fontStyle: "italic",
+    textAlign: "center",
+  },
   msgTime: { color: "#6b6b80", fontSize: 10, marginTop: 4, textAlign: "right" },
   inputRow: {
     flexDirection: "row",
@@ -639,7 +747,12 @@ const s = StyleSheet.create({
     borderTopColor: "#1e1e2e",
     backgroundColor: "#12121a",
   },
-  sendBtn: { backgroundColor: "#7c5cfc", paddingHorizontal: 18, borderRadius: 8, justifyContent: "center" },
+  sendBtn: {
+    backgroundColor: "#7c5cfc",
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    justifyContent: "center",
+  },
   sendBtnText: { color: "#fff", fontSize: 20, fontWeight: "700" },
   disabled: { opacity: 0.5 },
 });
