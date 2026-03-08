@@ -86,6 +86,22 @@ torvex/
 │           └── views/
 │               ├── Auth.jsx     (seed-only wallet auth + pin vault + prekey upload)
 │               └── Chat.jsx     (double ratchet chat, reconnect, notifications, otp replenish, history)
+│   └── mobile/                  (react native 0.84.1 — android only)
+│       ├── App.js               (root: auth gate, chat, qr scanner routing)
+│       ├── index.js             (entry + buffer polyfill)
+│       ├── metro.config.js
+│       ├── package.json
+│       ├── android/             (gradle build, native modules)
+│       └── src/
+│           ├── crypto/          (copied from web — keys.js, x3dh.js, ratchet.js)
+│           ├── screens/
+│           │   ├── AuthScreen.js  (pin vault + seed auth via mmkv + quick-crypto)
+│           │   ├── ChatScreen.js  (double ratchet chat, ws reconnect, otp replenish)
+│           │   └── ScanScreen.js  (qr code scanner via vision-camera)
+│           └── utils/
+│               ├── storage.js   (mmkv adapter — replaces localStorage)
+│               ├── vault.js     (pbkdf2 + aes-gcm via quick-crypto)
+│               └── api.js       (auth, prekey, profile, otp fetch helpers)
 ```
 
 ## security features
