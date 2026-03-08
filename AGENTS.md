@@ -186,7 +186,13 @@ torvex/
 
 ## next phases (from plan.md)
 
-- **phase 2**: react native android port + qr code scanning
+- **phase 2** (android branch): react native android + tor daemon + qr scanning
+  - bare react native cli (no expo — need native modules for tor + crypto)
+  - `react-native-quick-crypto` for webcrypto polyfill (x3dh/ratchet work unchanged)
+  - `react-native-mmkv` replaces localStorage/sessionStorage for vault + ratchet states
+  - `react-native-vision-camera` for qr code scanning (pubkey → x3dh_init)
+  - `react-native-tor` for local socks5 proxy (127.0.0.1:9050) — ws traffic routed through tor
+  - same api server (apps/api), same auth flow, same double ratchet protocol
 - **phase 3**: rewrite backend in rust + cassandra
 - **phase 4**: tor hidden service routing (paid tier)
 - **phase 5**: native swift ios + post-quantum crypto (ml-kem)
